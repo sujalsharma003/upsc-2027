@@ -461,14 +461,16 @@ function practiceNoteWeak(q,chosen){
       sourceUrl:q.sourceUrl,subject:q.subject,topicId:q.topicId||null,
       lastMissed:now,chosen,count:1,resolved:false});
    state.subjectWeakness[q.subject]=Math.min(40,(Number(state.subjectWeakness[q.subject])||0)+1);
-   if(q.topicId){
-     state.topicWeakness[q.topicId]=Math.min(30,revisionWeakScore(q.topicId)+2);
-     const p=state.topics[q.topicId];if(p){p.ready=false;p.revisionStage=0;p.revisionDue=addDays(todayISO(),1)}
+   const topicId=existing?.topicId||q.topicId;
+   if(topicId&&state.topics[topicId]){
+     state.topicWeakness[topicId]=Math.min(30,revisionWeakScore(topicId)+2);
+     const p=state.topics[topicId];p.ready=false;p.revisionStage=0;p.revisionDue=addDays(todayISO(),1);
    }
  }else{
    if(existing)existing.resolved=true;
    state.subjectWeakness[q.subject]=Math.max(0,(Number(state.subjectWeakness[q.subject])||0)-1);
-   if(q.topicId)state.topicWeakness[q.topicId]=Math.max(0,revisionWeakScore(q.topicId)-1);
+   const resolvedTopic=existing?.topicId||q.topicId;
+   if(resolvedTopic)state.topicWeakness[resolvedTopic]=Math.max(0,revisionWeakScore(resolvedTopic)-1);
  }
  state.mistakeLog=state.mistakeLog.slice(0,250);
 }
@@ -510,15 +512,16 @@ function renderPractice(){
  const unresolved=mistakes.filter(m=>!m.resolved),latest=history[0];
  const weakness=SEED.subjects.map(s=>({subject:s,score:Number(state.subjectWeakness[s.id])||0}))
   .filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
- const weakTopics=SEED.topics.filter(t=>revisionWeakScore(t.id)>0)
-  .sort((a,b)=>revisionWeakScore(b.id)-revisionWeakScore(a.id)).slice(0,12);
+ const allWeakTopics=SEED.topics.filter(t=>revisionWeakScore(t.id)>0)
+  .sort((a,b)=>revisionWeakScore(b.id)-revisionWeakScore(a.id));
+ const weakTopics=allWeakTopics.slice(0,12);
  let html=heading('Prelims Practice Studio',
   'Daily source-grounded MCQs, honest active recall for every syllabus topic and a mistake notebook that guides revision.',
   'DAILY QUIZ / WEAK AREAS');
  html+='<div class="cards">'+
   statCard('Completed quizzes',history.length,'Saved to your study state','◫')+
   statCard('Unresolved mistakes',unresolved.length,'Revisit and retest','!')+
-  statCard('Weak syllabus topics',weakTopics.length,'Linked to revisions','↻')+
+  statCard('Weak syllabus topics',allWeakTopics.length,'Linked to revisions','↻')+
   statCard('Recent accuracy',latest?Math.round(latest.correct/(latest.total||1)*100)+'%':'—','From your latest daily quiz','◎')+'</div>';
  if(practiceError)html+='<div class="ca-message">'+h(practiceError)+'</div>';
  html+='<section class="practice-card"><div class="section-heading"><div><h2>Smart daily quiz</h2><p>Up to 20 MCQs from existing Gemini notes. Generates no new AI calls.</p></div>'+
