@@ -298,6 +298,33 @@ def parse_prs(html):
         seen.add(url)
     return sorted(out,key=lambda v:v['published_date'],reverse=True)
 
+
+def parse_prs_highlights(html, monthly_url, issue_month):
+    """Official PRS highlights with month-level source attribution."""
+    if not safe_source(monthly_url) or not re.fullmatch(r'20\d{2}-(0[1-9]|1[0-2])',issue_month):
+        raise ValueError('Invalid PRS monthly issue source')
+    soup=BeautifulSoup(html,'html.parser')
+    if 'highlights of this issue' not in soup.get_text(' ',strip=True).lower():
+        return []
+    items=[]
+    seen=set()
+    for element in soup.select('a[href], p'):
+        strong=element.find('strong')
+        if strong is None:continue
+        label=re.sub(r'\s+',' ',strong.get_text(' ',strip=True)).strip()
+        if not (20<=len(label)<=280 and re.search(r'\(p\.\s*\d+\)',label,re.I)):
+            continue
+        title=re.sub(r'\s*\(p\.\s*\d+\)\s*$','',label,flags=re.I).strip()
+        if len(title)<20 or title.lower() in seen:continue
+        seen.add(title.lower())
+        items.append({'title':'PRS: '+title,'url':monthly_url,
+            'published_date':issue_month+'-01','date_precision':'month','source':'PRS',
+            'source_text':'PRS Monthly Policy Review '+issue_month+
+            ' highlights: '+title+'. This item is part of the monthly review, not a standalone dated release.'})
+        if len(items)>=35:break
+    return items
+
+
 def as_article(row,owner_id=None):
     tags,relevance=classify(row['title'],row.get('source_text',''))
     unique='|'.join([row['source'],row.get('url') or '',row['title'],row['published_date'],owner_id or ''])
@@ -333,6 +360,14 @@ def ingest_public_sources():
                     last_error=e
             if not parsed:
                 raise last_error or ValueError('No source articles')
+            if source=='PRS':
+                for review in list(parsed[:3]):
+                    try:
+                        details=parse_prs_highlights(safe_fetch(review['url']),review['url'],review['published_date'][:7])
+                        parsed.extend(details)
+                    except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                        result['errors'].append('PRS highlights: '+type(e).__name__)
+                parsed=parsed[:100]
             rows=[as_article(p) for p in parsed]
             # Ignore duplicate IDs; never replace previously approved analyses.
             added=rest_write('articles',rows,on_conflict='id',ignore_duplicates=True)
