@@ -23,7 +23,7 @@ if(!state.activePractice||!Array.isArray(state.activePractice.questions))state.a
 if(!state.aiBatchCheckpoint||!Array.isArray(state.aiBatchCheckpoint.ids))state.aiBatchCheckpoint=null;
 
 for(const k of ['completedTasks','readResources'])if(!state[k])state[k]={};for(const k of ['notes','documents','reminders','tests','studySessions'])if(!Array.isArray(state[k]))state[k]=[];if(!state.timerPrefs)state.timerPrefs={subject:'environment',mode:'stopwatch',taskId:''};
-let caUI={online:null,ai:false,auto:false,items:[],lastSync:null,source:'all',tag:'all',status:'all',search:'',from:'',to:'',expanded:null,loading:false,busyId:null,error:'',bulk:null};
+let caUI={online:null,ai:false,auto:false,items:[],lastSync:null,source:'all',tag:'all',status:'all',search:'',from:'',to:'',expanded:null,loading:false,busyId:null,error:'',bulk:state.aiBatchCheckpoint?{...state.aiBatchCheckpoint,running:false,stop:false}:null};
 let zenMode=false;let page='overview',day=clampPlan(todayISO()),weekIndex=between(Math.floor(dayDiff(SEED.startDate,day)/7),0,25),subjectFilter='all',statusFilter='all',query='',revisionFilter='all',revisionPageSize=40,noteQuery='',modal=null;
 const save=(cloud=true)=>{try{localStorage.setItem(STORE,JSON.stringify(state));if(cloud)window.SYLLABUS_CLOUD?.scheduleSave()}catch(e){toast('Local storage unavailable or full. Export a backup.')}};
 const topicStatus=t=>state.topics[t.id]?.status||t.status;
@@ -160,19 +160,23 @@ function caStableRender(articleId=null){
    window.scrollTo(0,oldScroll);
  }
 }
+
+function caBulkStatus(b){
+ return b.running?(b.stop?'Stopping after the current article…':'Generating official-source notes…'):
+       b.done<b.total?'Paused · resume when ready':'Batch completed';
+}
 function caBulkMarkup(){
- const b=caUI.bulk;
- if(!b)return '';
+ const b=caUI.bulk;if(!b)return '';
  const pct=b.total?Math.round(b.done/b.total*100):0;
- const status=b.running?(b.stop?'Stopping after this article…':'Generating official-source notes…'):'Batch finished';
- return `<section class="ca-bulk-panel" aria-label="Gemini batch generation progress" role="status" aria-live="polite">
-   <div class="ca-bulk-head"><strong>✳ GEMINI BATCH PROGRESS</strong><span data-ca-bulk-pct>${pct}%</span></div>
-   <div class="ca-bulk-meter" role="progressbar" aria-label="Gemini notes processed" aria-valuemin="0" aria-valuemax="${b.total}" aria-valuenow="${b.done}" data-ca-bulk-meter><i data-ca-bulk-fill style="width:${pct}%"></i></div>
-   <div class="ca-bulk-info"><span data-ca-bulk-status>${h(status)}</span><span data-ca-bulk-count>${b.done}/${b.total} processed · ${b.success} saved · ${b.failed} failed</span></div>
-   <p class="ca-bulk-current" data-ca-bulk-current>${h(b.current||'')}</p>
-   ${b.running?'<button class="ca-bulk-stop" data-ca-bulk-stop type="button">■ Stop after current</button>':''}
-   <p class="ca-bulk-help">This runs sequentially while the page stays open. Gemini daily quota applies; notes already saved are skipped.</p>
-  </section>`;
+ return '<section class="ca-bulk-panel" aria-label="Gemini batch generation progress" role="status" aria-live="polite">'+
+   '<div class="ca-bulk-head"><strong>✳ GEMINI BATCH PROGRESS</strong><span data-ca-bulk-pct>'+pct+'%</span></div>'+
+   '<div class="ca-bulk-meter" role="progressbar" aria-label="Gemini notes processed" aria-valuemin="0" aria-valuemax="'+b.total+'" aria-valuenow="'+b.done+'" data-ca-bulk-meter><i data-ca-bulk-fill style="width:'+pct+'%"></i></div>'+
+   '<div class="ca-bulk-info"><span data-ca-bulk-status>'+h(caBulkStatus(b))+'</span><span data-ca-bulk-count>'+b.done+'/'+b.total+' processed · '+b.success+' saved · '+b.failed+' failed</span></div>'+
+   '<p class="ca-bulk-current" data-ca-bulk-current>'+h(b.current||'')+'</p>'+
+   (b.running?'<button class="ca-bulk-stop" data-ca-bulk-stop type="button">■ Stop after current</button>':
+     b.done<b.total?'<button class="ca-bulk-resume" data-ca-bulk-resume type="button">▶ Resume remaining articles</button>':
+     '<button class="ca-bulk-resume" data-ca-bulk-dismiss type="button">✓ Clear completed batch</button>')+
+   '<p class="ca-bulk-help">Checkpoint is saved after each article in your study data. Resume after a refresh or connection loss; completed articles are skipped. Gemini provider quota applies.</p></section>';
 }
 function caBulkPaint(){
  const b=caUI.bulk;if(!b)return;
@@ -181,61 +185,97 @@ function caBulkPaint(){
  const fill=root.querySelector('[data-ca-bulk-fill]');if(fill)fill.style.width=pct+'%';
  const meter=root.querySelector('[data-ca-bulk-meter]');if(meter)meter.setAttribute('aria-valuenow',String(b.done));
  const percentage=root.querySelector('[data-ca-bulk-pct]');if(percentage)percentage.textContent=pct+'%';
- const status=root.querySelector('[data-ca-bulk-status]');if(status)status.textContent=b.running?(b.stop?'Stopping after this article…':'Generating official-source notes…'):'Batch finished';
+ const status=root.querySelector('[data-ca-bulk-status]');if(status)status.textContent=caBulkStatus(b);
  const counts=root.querySelector('[data-ca-bulk-count]');if(counts)counts.textContent=b.done+'/'+b.total+' processed · '+b.success+' saved · '+b.failed+' failed';
  const current=root.querySelector('[data-ca-bulk-current]');if(current)current.textContent=b.current||'';
  const stop=root.querySelector('[data-ca-bulk-stop]');if(stop){stop.disabled=b.stop;stop.textContent=b.stop?'Stopping…':'■ Stop after current'}
 }
-async function caBulkGenerate(){
+function caSaveCheckpoint(b){
+ // Save identifiers and progress only: never store source documents or API keys.
+ const cp={ids:b.ids,completedIds:b.completedIds,total:b.total,done:b.done,
+   success:b.success,failed:b.failed,current:b.current,
+   startedAt:b.startedAt,updatedAt:new Date().toISOString(),running:false};
+ state.aiBatchCheckpoint=cp;save();
+}
+async function caBulkGenerate(resume=false){
  if(caUI.bulk?.running||caUI.busyId!==null||caUI.loading)return;
  if(!caUI.ai||!caUI.online){caUI.error='Sign in and configure Gemini before generating notes.';caStableRender();return}
- let pending=[],generatedToday=0;
+ let articles=[],usage=0;
  try{
-   const quota=await caRequest('/api/ai/usage');
-   if(!quota.enabled)throw Error('Gemini is not configured.');
-   generatedToday=Number(quota.used)||0;
+   const q=await caRequest('/api/ai/usage');
+   if(!q.enabled)throw Error('Gemini is not configured.');
+   usage=Number(q.used)||0;
    for(let offset=0;offset<=9900;offset+=300){
-     const listing=await caRequest('/api/articles?limit=300&offset='+offset);
-     const batch=listing.items||[];
-     pending.push(...batch.filter(a=>!a.analysis&&['PIB','PRS','PDF'].includes(a.source)));
-     if(batch.length<300)break;
+     const result=await caRequest('/api/articles?limit=300&offset='+offset);
+     const portion=result.items||[];articles.push(...portion);
+     if(portion.length<300)break;
    }
  }catch(e){caUI.error='Unable to prepare batch: '+e.message;caStableRender();return}
- if(!pending.length){caUI.error='All currently loaded news already have Gemini notes.';caStableRender();return}
- const amount=pending.length;
- if(!confirm('Generate Gemini notes for '+amount+' news items now?\nGenerated today: '+generatedToday+'. Syllabus Club has no artificial daily limit. Gemini enforces its own project quotas.\nAPI usage may incur charges if billing is enabled. Notes will be saved to Supabase.\n\nThe batch runs in this browser. Keep the tab open; it stops when you request it or Gemini reports a quota limit.'))return;
- const queue=pending;
- const b={running:true,stop:false,total:queue.length,done:0,success:0,failed:0,current:'Preparing first article…'};
- caUI.bulk=b;caUI.error='';
- caStableRender();
+ const eligible=new Map(articles.filter(a=>['PIB','PRS','PDF'].includes(a.source)).map(a=>[a.id,a]));
+ const previous=resume?state.aiBatchCheckpoint:null;
+ if(resume&&(!previous||!Array.isArray(previous.ids))){caUI.error='No saved batch found.';caStableRender();return}
+ const ids=resume?previous.ids.filter(id=>eligible.has(id)):
+              articles.filter(a=>!a.analysis&&eligible.has(a.id)).map(a=>a.id);
+ const completed=new Set(resume?(previous.completedIds||[]):[]);
+ let successes=resume?(previous.success||0):0;
+ for(const id of ids){
+   if(!completed.has(id)&&eligible.get(id)?.analysis){completed.add(id);successes++}
+ }
+ const queue=ids.filter(id=>!completed.has(id));
+ if(!queue.length){
+   if(resume){
+     const cp={...previous,completedIds:[...completed],done:ids.length,success:successes,
+       current:'All batch articles already have notes.',running:false};
+     caUI.bulk=cp;caSaveCheckpoint(cp);caStableRender();return;
+   }
+   caUI.error='All imported articles already have saved Gemini notes.';
+   caStableRender();return;
+ }
+ if(!confirm((resume?'Resume':'Start')+' Gemini generation for '+queue.length+' remaining articles?\\n'+
+    'Generated today: '+usage+'. Gemini API quotas and possible billing charges apply.\\n'+
+    'Completed articles are skipped. Keep this tab open while generating; you can stop and resume later.'))return;
+ const b={ids,completedIds:[...completed],running:true,stop:false,
+   total:ids.length,done:completed.size,success:successes,
+   failed:resume?(previous.failed||0):0,
+   current:'Starting batch…',startedAt:resume?previous.startedAt:new Date().toISOString()};
+ caUI.bulk=b;caUI.error='';caSaveCheckpoint(b);caStableRender();
  let consecutiveErrors=0;
- for(const row of queue){
+ for(const id of queue){
    if(b.stop)break;
-   b.current=row.title;caBulkPaint();
+   const row=eligible.get(id);
+   b.current=row?.title||'Official article';caBulkPaint();
+   let finishThis=true;
    try{
-     const result=await caRequest('/api/articles/'+encodeURIComponent(row.id)+'/analyze',{method:'POST'});
-     const existing=caUI.items.find(x=>x.id===row.id);
-     if(existing&&result?.id)Object.assign(existing,result);
-     const article=document.querySelector('.ca-article[data-ca-item="'+row.id+'"]');
+     const result=await caRequest('/api/articles/'+encodeURIComponent(id)+'/analyze',{method:'POST'});
+     const current=caUI.items.find(x=>x.id===id);
+     if(current&&result?.id)Object.assign(current,result);
+     const article=document.querySelector('.ca-article[data-ca-item="'+id+'"]');
      if(article){const btn=article.querySelector('[data-ca-quick]');if(btn){btn.textContent='✳ View Gemini Notes';btn.disabled=false}}
      b.success++;consecutiveErrors=0;
    }catch(e){
-     b.failed++;consecutiveErrors++;
      const msg=String(e?.message||'Unknown error');
-     if(/429|quota|rate limit|resource.exhausted/i.test(msg)){b.stop=true;b.current='Stopped: Gemini API quota or rate limit reached. Resume when the provider allows more requests.'}
-     else if(consecutiveErrors>=3){b.stop=true;b.current='Stopped after 3 consecutive errors. Check your Gemini configuration.'}
-     else b.current='Skipped: '+row.title+' — '+msg.slice(0,120);
+     if(/429|quota|rate limit|resource.exhausted/i.test(msg)){
+       finishThis=false;b.stop=true;
+       b.current='Gemini quota reached. The remaining queue is saved for later.';
+     }else{
+       b.failed++;consecutiveErrors++;
+       b.current='Skipped: '+(row?.title||'article')+' — '+msg.slice(0,120);
+       if(consecutiveErrors>=3){b.stop=true;b.current='Paused after 3 errors. Check source or Gemini access.'}
+     }
    }finally{
-     b.done++;
-     caBulkPaint();
+     if(finishThis&&!completed.has(id)){
+       completed.add(id);b.completedIds=[...completed];b.done=completed.size;
+     }
+     caSaveCheckpoint(b);caBulkPaint();
    }
  }
  b.running=false;
- if(!b.stop)b.current='Completed '+b.done+' of '+b.total+' selected items.';
- else if(!b.current.startsWith('Stopped'))b.current='Stopped after '+b.done+' items.';
+ if(b.done===b.total)b.current='All '+b.total+' articles processed. '+b.success+' saved.';
+ else if(!b.current.includes('quota')&&!b.current.includes('Paused'))b.current='Paused after '+b.done+' of '+b.total+' articles.';
+ caSaveCheckpoint(b);
  try{await caLoad({renderAfter:false})}catch(e){}
  if(page==='current')caStableRender();
- toast('Gemini batch: '+b.success+' notes saved, '+b.failed+' failed.');
+ toast('Gemini batch: '+b.success+' notes saved · '+b.failed+' failed · '+(b.total-b.done)+' remaining.');
 }
 
 let caLoadEpoch=0;
@@ -622,7 +662,9 @@ async function handleSubmit(e){const form=e.target;const formId=form.getAttribut
  if(formId==='test-form'){const correct=Number(o.correct),wrong=Number(o.wrong),type=o.type;if(!Number.isInteger(correct)||!Number.isInteger(wrong)||correct<0||wrong<0||correct+wrong>100)return toast('Correct + incorrect must be 100 or fewer');const positive=type==='CSAT'?2.5:2,negative=positive/3,score=num(correct*positive-wrong*negative);state.tests.push({id:rid(),name:o.name,date:o.date,type,correct,wrong,score,analysis:o.analysis,createdAt:new Date().toISOString()});modal=null;save();render();toast('Test results saved')}
 }
 async function handleClick(e){const el=e.target.closest('button');if(!el)return;
- if(el.dataset.caBulkStart!==undefined){await caBulkGenerate();return}
+ if(el.dataset.caBulkStart!==undefined){await caBulkGenerate(false);return}
+ if(el.dataset.caBulkResume!==undefined){await caBulkGenerate(true);return}
+ if(el.dataset.caBulkDismiss!==undefined){state.aiBatchCheckpoint=null;caUI.bulk=null;save();caStableRender();return}
  if(el.dataset.caBulkStop!==undefined){if(caUI.bulk?.running){caUI.bulk.stop=true;caBulkPaint()}return}
  if(el.dataset.caRetryCloud!==undefined){caUI.online=null;caUI.error='';caStableRender();try{await window.SYLLABUS_CLOUD?.reconnect()}catch(e){caUI.error=e.message}await caLoad();return}
  if(el.dataset.caSync!==undefined){await caSync();return}
