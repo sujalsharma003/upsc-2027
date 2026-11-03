@@ -419,3 +419,30 @@ def _candidate_source_probe_v6():
         except Exception as exc:
             out[key]={'error':type(exc).__name__+': '+str(exc)[:140]}
     return out
+
+
+@app.get('/api/_prs_exact_structure_v6')
+def _prs_exact_structure_v6():
+    from bs4 import BeautifulSoup
+    s=BeautifulSoup(c.safe_fetch('https://prsindia.org/policy/monthly-policy-review/october-2026'),'html.parser')
+    out={}
+    for term in ('Repo rate increased','Cabinet approves a growth fund',
+                 'National Social Assistance Programme','GST Council'):
+        found=next((t for t in s.find_all('strong') if term.lower() in t.get_text(' ',strip=True).lower()),None)
+        if not found:
+            out[term]=None
+            continue
+        n=found
+        parents=[]
+        for i in range(7):
+            if n is None:break
+            siblings=[]
+            for sibling in list(n.next_siblings)[:5]:
+                if getattr(sibling,'name',None):
+                    siblings.append({'tag':sibling.name,'class':sibling.get('class'),'text':sibling.get_text(' ',strip=True)[:270]})
+            parents.append({'tag':n.name,'class':n.get('class'),'id':n.get('id'),
+               'children':len(list(n.children)),'text':n.get_text(' ',strip=True)[:480],
+               'next_siblings':siblings})
+            n=n.parent
+        out[term]=parents
+    return out
