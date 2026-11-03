@@ -366,5 +366,35 @@ def diagnose_official_sources():
             }
         except Exception as e:
             info[label]={'error_type':type(e).__name__, 'error':str(e)[:120]}
+    # One-time source samples for parser compatibility
+    try:
+        import xml.etree.ElementTree as ET
+        xml=c.safe_fetch(c.PIB)
+        root=ET.fromstring(xml.lstrip('\ufeff'))
+        samples=[]
+        for it in list(root.findall('.//item'))[:3]:
+            samples.append({el.tag.split('}')[-1]:''.join(el.itertext())[:360] for el in it})
+        info['rss_samples']={'items':len(root.findall('.//item')),'samples':samples}
+    except Exception as e:info['rss_samples']={'error':str(e)[:150]}
+    try:
+        from bs4 import BeautifulSoup
+        html=c.safe_fetch(c.PIB_ALL)
+        soup=BeautifulSoup(html,'html.parser')
+        snippets=[]
+        for text_el in soup.find_all(string=lambda s:s and 'Posted on' in s):
+            parent=text_el.parent
+            block=parent
+            for k in range(3):
+                if block and block.parent:block=block.parent
+            snippets.append(str(block)[:1350])
+            if len(snippets)>=3:break
+        info['pib_listing_fragments']=snippets
+    except Exception as e:info['pib_listing_fragments']={'error':str(e)[:150]}
+    try:
+        from bs4 import BeautifulSoup
+        soup=BeautifulSoup(c.safe_fetch('https://prsindia.org/policy/monthly-policy-review/october-2026'),'html.parser')
+        info['prs_heading_samples']=[{'tag':h.name,'text':h.get_text(' ',strip=True)[:180],'parent_excerpt':h.parent.get_text(' ',strip=True)[:250]} for h in soup.select('h1,h2,h3,h4')[:20]]
+        info['prs_body_text_length']=len(soup.get_text(' ',strip=True))
+    except Exception as e:info['prs_heading_samples']={'error':str(e)[:150]}
     return info
 
