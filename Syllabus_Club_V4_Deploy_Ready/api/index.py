@@ -339,11 +339,3 @@ def api_root():
 
 
 
-@app.get('/api/_study_engine_check')
-def study_engine_check():
-    """Non-sensitive sample check used only on a preview branch."""
-    sample={'title':'RBI announces monetary policy update','source':'PIB',
-        'tags':['Economy'],'relevance':77,'excerpt':'See official source for release.'}
-    g=c.study_guidance(sample)
-    return {'guide':g,'has_guidance_in_article':bool(c.flatten_article(sample).get('study_guidance')),
-      'high_priority':g['priority']=='high','has_active_recall':len(g['recall_questions'])>=2}

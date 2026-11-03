@@ -156,3 +156,23 @@ def test_study_guidance_demotes_ceremonies():
     g=study_guidance({'title':'Minister congratulates award winners','tags':['Polity'],
                       'relevance':88,'excerpt':''})
     assert g['priority']!='high'
+
+
+def test_first_read_schedules_tomorrows_recall(monkeypatch):
+    from datetime import date, timedelta
+    signed_in()
+    monkeypatch.setattr(core,'visible_article',
+        lambda article_id,user_id:{'id':article_id,'owner_id':None,
+          'source':'PIB','title':'RBI policy','tags':['Economy'],
+          'relevance':75,'excerpt':'Official note'})
+    monkeypatch.setattr(core,'rest_rows',lambda *args,**kwargs:[])
+    writes=[]
+    def capture_write(table,rows,**kwargs):
+        writes.append((table,rows))
+        return rows
+    monkeypatch.setattr(core,'rest_write',capture_write)
+    article_id='77777777-7777-4777-8777-777777777777'
+    response=client.post('/api/articles/'+article_id+'/status',json={'status':'read'})
+    assert response.status_code==200
+    assert writes[0][0]=='article_progress'
+    assert writes[0][1][0]['revision_due']==(date.today()+timedelta(days=1)).isoformat()
