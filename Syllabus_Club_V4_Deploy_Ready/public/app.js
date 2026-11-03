@@ -16,7 +16,7 @@ let state;try{const saved=localStorage.getItem(STORE);state=saved?JSON.parse(sav
 if(!state||!state.topics)state=initial();
 for(const t of SEED.topics)if(!state.topics[t.id])state.topics[t.id]={status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false};
 for(const k of ['completedTasks','readResources'])if(!state[k])state[k]={};for(const k of ['notes','documents','reminders','tests','studySessions'])if(!Array.isArray(state[k]))state[k]=[];if(!state.timerPrefs)state.timerPrefs={subject:'environment',mode:'stopwatch',taskId:''};
-let caUI={online:null,ai:false,auto:false,items:[],lastSync:null,source:'all',tag:'all',status:'all',search:'',from:'',to:'',expanded:null,loading:false,busyId:null,error:''};
+let caUI={online:null,ai:false,auto:false,items:[],lastSync:null,source:'all',tag:'all',status:'all',search:'',from:'',to:'',expanded:null,loading:false,busyId:null,error:'',bulk:null};
 let zenMode=false;let page='overview',day=clampPlan(todayISO()),weekIndex=between(Math.floor(dayDiff(SEED.startDate,day)/7),0,25),subjectFilter='all',statusFilter='all',query='',revisionFilter='all',noteQuery='',modal=null;
 const save=(cloud=true)=>{try{localStorage.setItem(STORE,JSON.stringify(state));if(cloud)window.SYLLABUS_CLOUD?.scheduleSave()}catch(e){toast('Local storage unavailable or full. Export a backup.')}};
 const topicStatus=t=>state.topics[t.id]?.status||t.status;
@@ -125,17 +125,122 @@ function renderCurrentAffairs(){const all=caUI.items||[];const shown=all.filter(
  const tagSelect=[['all','All subjects'],...['Polity','Economy','Environment','Geography','Science & Tech','International Relations','History & Culture','Social Issues'].map(t=>[t,t])].map(([v,t])=>`<option value="${h(v)}" ${caUI.tag===v?'selected':''}>${h(t)}</option>`).join('');
  const statusSelect=[['all','Every reading status'],['unread','To read'],['saved','Saved'],['read','Read'],['due','Revision due']].map(([v,t])=>`<option value="${v}" ${caUI.status===v?'selected':''}>${t}</option>`).join('');
  const statusText=caUI.online===null?'Checking your cloud account…':caUI.online?(caUI.ai?'Cloud connected · Gemini ready':'Cloud connected · Gemini key missing'):'Sign in via ☁ CLOUD to access your private feed';
- return `<div class="ca-hero"><div><div class="ca-kicker">✳ THE INTELLIGENCE DESK / UPSC 2027</div><h1>News in.<br><em>Knowledge out.</em></h1><p>Your date-wise official-source inbox. Less doomscrolling, more actual Prelims revision.</p><div class="ca-hero-actions"><button class="ca-sync" data-ca-sync ${!caUI.online||caUI.loading?'disabled':''}>${caUI.loading?'Syncing…':'↻ Sync PIB + PRS'}</button><span class="ca-status ${caUI.online?'connected':''}"><i></i>${h(statusText)}</span></div></div><div class="ca-hero-mark">✳<span>THE DAILY<br>DECODE</span></div></div>
+ return `<div class="ca-hero"><div><div class="ca-kicker">✳ THE INTELLIGENCE DESK / UPSC 2027</div><h1>News in.<br><em>Knowledge out.</em></h1><p>Your date-wise official-source inbox. Less doomscrolling, more actual Prelims revision.</p><div class="ca-hero-actions"><button class="ca-sync" data-ca-sync ${!caUI.online||caUI.loading||caUI.bulk?.running?'disabled':''}>${caUI.loading?'Syncing…':'↻ Sync PIB + PRS'}</button><button class="ca-bulk-launch" data-ca-bulk-start type="button" ${!caUI.online||!caUI.ai||caUI.loading||caUI.busyId!==null||caUI.bulk?.running?'disabled':''}>✳ ${caUI.bulk?.running?'Generating notes…':'Generate Notes for All News'}</button><span class="ca-status ${caUI.online?'connected':''}"><i></i>${h(statusText)}</span></div></div><div class="ca-hero-mark">✳<span>THE DAILY<br>DECODE</span></div></div>
+ ${caBulkMarkup()}
  <div class="ca-metrics"><div><span>IN YOUR INBOX</span><strong>${all.length}</strong><small>Official / uploaded sources</small></div><div><span>TO READ</span><strong>${all.filter(x=>x.read_status==='unread').length}</strong><small>Unreviewed entries</small></div><div><span>REVISION DUE</span><strong>${due}</strong><small>Spaced review queue</small></div><div><span>AI STUDY NOTES</span><strong>${all.filter(x=>x.analysis).length}</strong><small>Source-linked notes</small></div></div>
  ${caUI.error?`<div class="ca-message">${h(caUI.error)}</div>`:''}
  <div class="ca-grid"><section><div class="section-heading"><div><h2>Daily source feed</h2><p>Archive by published date, never by upload date</p></div><span class="small-tag">${shown.length} MATCHING</span></div><div class="ca-filters"><select aria-label="Filter sources" id="ca-source" class="select">${sourceSelect}</select><select aria-label="Filter syllabus category" id="ca-tag" class="select">${tagSelect}</select><select aria-label="Reading status" id="ca-status" class="select">${statusSelect}</select><input id="ca-search" class="input" placeholder="Search news, ministries, topics…" value="${h(caUI.search)}" aria-label="Search Current Affairs"><label>From <input id="ca-from" class="input" type="date" value="${h(caUI.from)}"></label><label>To <input id="ca-to" class="input" type="date" value="${h(caUI.to)}"></label><button class="outline-btn" data-ca-filter>Apply filters ↗</button><button class="outline-btn" data-ca-export ${!caUI.online?'disabled':''}>↓ Export archive</button></div>
- ${Object.keys(grouped).length?Object.keys(grouped).sort().reverse().map(key=>`<div class="ca-day-head"><span>▦ ${h(key.length===7?niceDate(key+'-01',{month:'long',year:'numeric'}):niceDate(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'}))}</span><span>${grouped[key].length} entries</span></div>${grouped[key].map(a=>{const link=caSafeLink(a),isOpen=caUI.expanded===a.id;return `<article class="ca-article ${isOpen?'ca-open':''}"><div class="ca-row-top"><span class="ca-origin ca-${a.source.toLowerCase()}">${a.source==='PDF'?'↑ YOUR PDF':h(a.source)}</span><span>${h(caDate(a))}</span><span class="ca-score">${a.study_guidance?.priority==='high'?'HIGH PRIORITY':a.study_guidance?.priority==='medium'?'RELEVANT':'CHECK RELEVANCE'}</span></div><h3>${h(a.title)}</h3><div class="ca-article-tags">${(a.tags||[]).map(t=>`<span>${h(t)}</span>`).join('')||'<span>Uncategorized</span>'}</div><div class="ca-excerpt">${h(a.excerpt?.slice(0,200)||'Open original to read the announcement.')}${a.excerpt?.length>200?'…':''}</div><div class="ca-actions"><button class="ca-button ca-alt" type="button" data-ca-quick="${a.id}" ${(!caUI.ai&&!a.analysis)||caUI.busyId!==null?"disabled":""}>${caUI.busyId===a.id?"⏳ Generating…":a.analysis?"✳ View Gemini Notes":"✳ Generate Gemini Notes"}</button><button class="ca-button" data-ca-detail="${a.id}">${isOpen?'Hide notes ↑':'Study this ↗'}</button>${link?`<a class="ca-external" href="${h(link)}" target="_blank" rel="noopener noreferrer">Original source ↗</a>`:a.source==='PDF'?`<button class="ca-external" type="button" data-ca-file="${a.id}">Open PDF ↗</button>`:''}<button class="ca-quiet" data-ca-status-action="${a.id}" data-ca-new-status="${a.read_status==='read'?'unread':'read'}">${a.read_status==='read'?'↶ Unread':'✓ Read'}</button><button class="ca-quiet" data-ca-status-action="${a.id}" data-ca-new-status="${a.read_status==='saved'?'unread':'saved'}">${a.read_status==='saved'?'★ Saved':'☆ Save'}</button></div>${a.revision_due?`<div class="ca-review-date">↻ Next revision ${h(niceDate(a.revision_due))} · Stage ${a.revision_stage}</div>`:''}${isOpen?`${caGuideMarkup(a)}${caNoteMarkup(a)}<div class="ca-actions ca-study-actions"><button class="ca-button ca-alt" data-ca-analyze="${a.id}" ${!caUI.ai||caUI.busyId===a.id?'disabled':''}>${caUI.busyId===a.id?'Generating…':a.analysis?'✳ Regenerate Gemini notes':'✳ Generate Gemini notes'}</button><button class="ca-quiet" data-ca-revise="${a.id}">↻ Mark revised</button><button class="ca-quiet" data-ca-note="${a.id}">＋ Save to Notebook</button></div>`:''}</article>`}).join('')}`).join(''):`<div class="ca-empty"><span>✳</span><h3>${caUI.online?'Your source feed is clear.':'Your intelligence desk is ready.'}</h3><p>${caUI.online?'Sync official sources or upload a PDF to build your date-wise archive.':'Open ☁ Cloud settings to sign in. The study dashboard also remains available offline in this browser.'}</p><div class="ca-empty-links"><a href="https://www.pib.gov.in/ViewRss.aspx?lang=1&reg=1" target="_blank" rel="noopener noreferrer">PIB official RSS ↗</a><a href="https://prsindia.org/policy/monthly-policy-review" target="_blank" rel="noopener noreferrer">PRS archive ↗</a></div></div>`}
+ ${Object.keys(grouped).length?Object.keys(grouped).sort().reverse().map(key=>`<div class="ca-day-head"><span>▦ ${h(key.length===7?niceDate(key+'-01',{month:'long',year:'numeric'}):niceDate(key,{weekday:'long',day:'numeric',month:'long',year:'numeric'}))}</span><span>${grouped[key].length} entries</span></div>${grouped[key].map(a=>{const link=caSafeLink(a),isOpen=caUI.expanded===a.id;return `<article data-ca-item="${h(a.id)}" class="ca-article ${isOpen?'ca-open':''}"><div class="ca-row-top"><span class="ca-origin ca-${a.source.toLowerCase()}">${a.source==='PDF'?'↑ YOUR PDF':h(a.source)}</span><span>${h(caDate(a))}</span><span class="ca-score">${a.study_guidance?.priority==='high'?'HIGH PRIORITY':a.study_guidance?.priority==='medium'?'RELEVANT':'CHECK RELEVANCE'}</span></div><h3>${h(a.title)}</h3><div class="ca-article-tags">${(a.tags||[]).map(t=>`<span>${h(t)}</span>`).join('')||'<span>Uncategorized</span>'}</div><div class="ca-excerpt">${h(a.excerpt?.slice(0,200)||'Open original to read the announcement.')}${a.excerpt?.length>200?'…':''}</div><div class="ca-actions"><button class="ca-button ca-alt" type="button" data-ca-quick="${a.id}" ${(!caUI.ai&&!a.analysis)||caUI.busyId!==null?"disabled":""}>${caUI.busyId===a.id?"⏳ Generating…":a.analysis?"✳ View Gemini Notes":"✳ Generate Gemini Notes"}</button><button class="ca-button" data-ca-detail="${a.id}">${isOpen?'Hide notes ↑':'Study this ↗'}</button>${link?`<a class="ca-external" href="${h(link)}" target="_blank" rel="noopener noreferrer">Original source ↗</a>`:a.source==='PDF'?`<button class="ca-external" type="button" data-ca-file="${a.id}">Open PDF ↗</button>`:''}<button class="ca-quiet" data-ca-status-action="${a.id}" data-ca-new-status="${a.read_status==='read'?'unread':'read'}">${a.read_status==='read'?'↶ Unread':'✓ Read'}</button><button class="ca-quiet" data-ca-status-action="${a.id}" data-ca-new-status="${a.read_status==='saved'?'unread':'saved'}">${a.read_status==='saved'?'★ Saved':'☆ Save'}</button></div>${a.revision_due?`<div class="ca-review-date">↻ Next revision ${h(niceDate(a.revision_due))} · Stage ${a.revision_stage}</div>`:''}${isOpen?`${caGuideMarkup(a)}${caNoteMarkup(a)}<div class="ca-actions ca-study-actions"><button class="ca-button ca-alt" data-ca-analyze="${a.id}" ${!caUI.ai||caUI.busyId===a.id?'disabled':''}>${caUI.busyId===a.id?'Generating…':a.analysis?'✳ Regenerate Gemini notes':'✳ Generate Gemini notes'}</button><button class="ca-quiet" data-ca-revise="${a.id}">↻ Mark revised</button><button class="ca-quiet" data-ca-note="${a.id}">＋ Save to Notebook</button></div>`:''}</article>`}).join('')}`).join(''):`<div class="ca-empty"><span>✳</span><h3>${caUI.online?'Your source feed is clear.':'Your intelligence desk is ready.'}</h3><p>${caUI.online?'Sync official sources or upload a PDF to build your date-wise archive.':'Open ☁ Cloud settings to sign in. The study dashboard also remains available offline in this browser.'}</p><div class="ca-empty-links"><a href="https://www.pib.gov.in/ViewRss.aspx?lang=1&reg=1" target="_blank" rel="noopener noreferrer">PIB official RSS ↗</a><a href="https://prsindia.org/policy/monthly-policy-review" target="_blank" rel="noopener noreferrer">PRS archive ↗</a></div></div>`}
  </section><aside class="ca-side"><div class="ca-side-card ca-side-lime"><div class="ca-side-kicker">YOUR 45-MINUTE SLOT ↗</div><h3>The daily<br>decode.</h3><p>15 min official updates<br>15 min AI notes + static links<br>15 min MCQs & active recall</p><button data-nav="today">View study plan ↗</button></div><div class="ca-side-card"><div class="ca-side-kicker">02 / PERSONAL PDF INBOX</div><h3>Drop it.<br>Decode it.</h3><p>Upload your coaching monthly magazine or self-made PDF. Choose the document's published date; we won't assume the upload date.</p><form id="ca-pdf-form"><label>Publication / issue date<input class="input" name="published_date" type="date" required value="${todayISO()}"></label><label>Choose a text-based PDF<input class="input" type="file" name="file" accept="application/pdf,.pdf" required></label><button class="primary-btn" ${!caUI.online?'disabled':''} type="submit">↑ Import into archive</button></form><p class="tiny text-muted">Max 15 MB / 120 pages. Scanned PDFs need OCR and are not supported yet. File saved on your computer's local server.</p></div><div class="ca-side-card"><div class="ca-side-kicker">03 / SOURCE TRANSPARENCY</div><h3>No made-up headlines.</h3><p>PIB and PRS stay linked to originals. Topic priority is rule-based until AI analysis is generated. AI summaries need verification.</p><div class="ca-synced">Last attempt: ${caUI.lastSync?.ran_at?h(caUI.lastSync.ran_at.replace('T',' ').slice(0,16)+' UTC'):'Not yet'}</div>${caUI.lastSync?.errors?.length?`<p class="ca-caution">${h(caUI.lastSync.errors.join(' · '))}</p>`:''}</div></aside></div>`;
 }
 async function caRequest(path,opts={}){if(!window.SYLLABUS_CLOUD?.loggedIn)throw Error('Sign in using the ☁ Cloud account button first');return await window.SYLLABUS_CLOUD.api(path,opts)}
-async function caLoad(){try{const [health,list]=await Promise.all([caRequest('/api/health'),caRequest('/api/articles?'+new URLSearchParams({source:caUI.source,tag:caUI.tag,date_from:caUI.from,date_to:caUI.to,q:caUI.search,limit:'200'}))]);caUI.online=health.online;caUI.ai=health.ai_enabled;caUI.auto=health.auto_sync;caUI.lastSync=health.last_sync;caUI.items=list.items;caUI.error='';}catch(e){caUI.online=false;caUI.error='Cloud account required. Open ☁ Cloud to sign in. '+e.message;}if(page==='current')render()}
+function caStableRender(articleId=null){
+ if(page!=='current'){render();return}
+ const oldScroll=window.scrollY;
+ const cards=[...document.querySelectorAll('.ca-article[data-ca-item]')];
+ const anchor=(articleId&&cards.find(a=>a.dataset.caItem===articleId))||
+     cards.find(a=>a.getBoundingClientRect().bottom>80)||null;
+ const key=anchor?.dataset.caItem,top=anchor?.getBoundingClientRect().top;
+ render();
+ const updated=key?[...document.querySelectorAll('.ca-article[data-ca-item]')]
+   .find(a=>a.dataset.caItem===key):null;
+ if(updated&&Number.isFinite(top)){
+   window.scrollBy(0,updated.getBoundingClientRect().top-top);
+ }else{
+   window.scrollTo(0,oldScroll);
+ }
+}
+function caBulkMarkup(){
+ const b=caUI.bulk;
+ if(!b)return '';
+ const pct=b.total?Math.round(b.done/b.total*100):0;
+ const status=b.running?(b.stop?'Stopping after this article…':'Generating official-source notes…'):'Batch finished';
+ return \`<section class="ca-bulk-panel" aria-label="Gemini batch generation progress" role="status" aria-live="polite">
+   <div class="ca-bulk-head"><strong>✳ GEMINI BATCH PROGRESS</strong><span data-ca-bulk-pct>\${pct}%</span></div>
+   <div class="ca-bulk-meter" role="progressbar" aria-label="Gemini notes processed" aria-valuemin="0" aria-valuemax="\${b.total}" aria-valuenow="\${b.done}" data-ca-bulk-meter><i data-ca-bulk-fill style="width:\${pct}%"></i></div>
+   <div class="ca-bulk-info"><span data-ca-bulk-status>\${h(status)}</span><span data-ca-bulk-count>\${b.done}/\${b.total} processed · \${b.success} saved · \${b.failed} failed</span></div>
+   <p class="ca-bulk-current" data-ca-bulk-current>\${h(b.current||'')}</p>
+   \${b.running?'<button class="ca-bulk-stop" data-ca-bulk-stop type="button">■ Stop after current</button>':''}
+   <p class="ca-bulk-help">This runs sequentially while the page stays open. Gemini daily quota applies; notes already saved are skipped.</p>
+  </section>\`;
+}
+function caBulkPaint(){
+ const b=caUI.bulk;if(!b)return;
+ const root=document.querySelector('.ca-bulk-panel');if(!root)return;
+ const pct=b.total?Math.round(b.done/b.total*100):0;
+ const fill=root.querySelector('[data-ca-bulk-fill]');if(fill)fill.style.width=pct+'%';
+ const meter=root.querySelector('[data-ca-bulk-meter]');if(meter)meter.setAttribute('aria-valuenow',String(b.done));
+ const percentage=root.querySelector('[data-ca-bulk-pct]');if(percentage)percentage.textContent=pct+'%';
+ const status=root.querySelector('[data-ca-bulk-status]');if(status)status.textContent=b.running?(b.stop?'Stopping after this article…':'Generating official-source notes…'):'Batch finished';
+ const counts=root.querySelector('[data-ca-bulk-count]');if(counts)counts.textContent=b.done+'/'+b.total+' processed · '+b.success+' saved · '+b.failed+' failed';
+ const current=root.querySelector('[data-ca-bulk-current]');if(current)current.textContent=b.current||'';
+ const stop=root.querySelector('[data-ca-bulk-stop]');if(stop){stop.disabled=b.stop;stop.textContent=b.stop?'Stopping…':'■ Stop after current'}
+}
+async function caBulkGenerate(){
+ if(caUI.bulk?.running||caUI.busyId!==null||caUI.loading)return;
+ if(!caUI.ai||!caUI.online){caUI.error='Sign in and configure Gemini before generating notes.';caStableRender();return}
+ let pending=[],remaining=0,dailyLimit=10;
+ try{
+   const [quota,listing]=await Promise.all([
+     caRequest('/api/ai/usage'),
+     caRequest('/api/articles?limit=300')
+   ]);
+   dailyLimit=quota.limit;
+   remaining=quota.remaining;
+   pending=(listing.items||[]).filter(a=>!a.analysis&&['PIB','PRS','PDF'].includes(a.source));
+ }catch(e){caUI.error='Unable to prepare batch: '+e.message;caStableRender();return}
+ if(!pending.length){caUI.error='All currently loaded news already have Gemini notes.';caStableRender();return}
+ if(remaining<=0){caUI.error='Daily Gemini limit reached ('+dailyLimit+' generations). Try again tomorrow.';caStableRender();return}
+ const amount=Math.min(pending.length,remaining);
+ if(!confirm('Generate Gemini notes for '+amount+' news items now?\\n'+pending.length+' do not have notes; today you have '+remaining+' of '+dailyLimit+' generations remaining.\\nEach generation may use Gemini API quota or incur charges. Notes will be saved to Supabase.\\n\\nThis batch runs in this browser, so keep the tab open.'))return;
+ const queue=pending.slice(0,amount);
+ const b={running:true,stop:false,total:queue.length,done:0,success:0,failed:0,current:'Preparing first article…'};
+ caUI.bulk=b;caUI.error='';
+ caStableRender();
+ let consecutiveErrors=0;
+ for(const row of queue){
+   if(b.stop)break;
+   b.current=row.title;caBulkPaint();
+   try{
+     const result=await caRequest('/api/articles/'+encodeURIComponent(row.id)+'/analyze',{method:'POST'});
+     const existing=caUI.items.find(x=>x.id===row.id);
+     if(existing&&result?.id)Object.assign(existing,result);
+     const article=document.querySelector('.ca-article[data-ca-item="'+row.id+'"]');
+     if(article){const btn=article.querySelector('[data-ca-quick]');if(btn){btn.textContent='✳ View Gemini Notes';btn.disabled=false}}
+     b.success++;consecutiveErrors=0;
+   }catch(e){
+     b.failed++;consecutiveErrors++;
+     const msg=String(e?.message||'Unknown error');
+     if(/429|quota|rate limit|daily.*limit/i.test(msg)){b.stop=true;b.current='Stopped: daily quota or rate limit reached.'}
+     else if(consecutiveErrors>=3){b.stop=true;b.current='Stopped after 3 consecutive errors. Check your Gemini configuration.'}
+     else b.current='Skipped: '+row.title+' — '+msg.slice(0,120);
+   }finally{
+     b.done++;
+     caBulkPaint();
+   }
+ }
+ b.running=false;
+ if(!b.stop)b.current='Completed '+b.done+' of '+b.total+' selected items.';
+ else if(!b.current.startsWith('Stopped'))b.current='Stopped after '+b.done+' items.';
+ try{await caLoad({renderAfter:false})}catch(e){}
+ if(page==='current')caStableRender();
+ toast('Gemini batch: '+b.success+' notes saved, '+b.failed+' failed.');
+}
+
+async function caLoad({renderAfter=true}={}){try{const [health,list]=await Promise.all([caRequest('/api/health'),caRequest('/api/articles?'+new URLSearchParams({source:caUI.source,tag:caUI.tag,date_date_from:caUI.from,date_to:caUI.to,q:caUI.search,limit:'200'}))]);caUI.online=health.online;caUI.ai=health.ai_enabled;caUI.auto=health.auto_sync;caUI.lastSync=health.last_sync;caUI.items=list.items;caUI.error='';}catch(e){caUI.error='Cloud account required or fetch failed: '+e.message;}if(renderAfter&&page==='current')caStableRender()}
 async function caSync(){caUI.loading=true;render();try{const x=await caRequest('/api/refresh',{method:'POST'});caUI.lastSync=x;caUI.error=x.errors?.length?'Some sources were unreachable: '+x.errors.join(' · '):`Sync completed: ${x.added} new entries`;await caLoad();}catch(e){caUI.error=e.message}finally{caUI.loading=false;render()}}
-async function caMutation(fn,id){caUI.busyId=id;render();try{await fn();await caLoad();}catch(e){caUI.error=e.message;toast(e.message)}finally{caUI.busyId=null;render()}}
+async function caMutation(fn,id){
+ if(caUI.busyId!==null||caUI.bulk?.running)return;
+ caUI.busyId=id;
+ const item=document.querySelector('.ca-article[data-ca-item="'+id+'"]');
+ if(item){item.setAttribute('aria-busy','true');const btn=item.querySelector('[data-ca-quick]');if(btn){btn.disabled=true;btn.textContent='⏳ Generating…'}}
+ try{
+   const result=await fn();
+   const found=caUI.items.find(a=>a.id===id);if(found&&result?.id)Object.assign(found,result);
+   await caLoad({renderAfter:false});
+ }catch(e){caUI.error=e.message;toast(e.message)}
+ finally{caUI.busyId=null;if(page==='current')caStableRender(id)}
+}
 function renderOverview(){
  const s=stats(),tasks=getDayTasks(day),done=tasks.filter(t=>taskDone(t.id)).length,days=Math.max(0,dayDiff(todayISO(),SEED.examDate));
  const urgent=urgentReminders(),due=dueTopics(),backlog=backlogTasks();const w=currentWeek(weekIndex);
@@ -232,11 +337,13 @@ async function handleSubmit(e){const form=e.target;const formId=form.getAttribut
  if(formId==='test-form'){const correct=Number(o.correct),wrong=Number(o.wrong),type=o.type;if(!Number.isInteger(correct)||!Number.isInteger(wrong)||correct<0||wrong<0||correct+wrong>100)return toast('Correct + incorrect must be 100 or fewer');const positive=type==='CSAT'?2.5:2,negative=positive/3,score=num(correct*positive-wrong*negative);state.tests.push({id:rid(),name:o.name,date:o.date,type,correct,wrong,score,analysis:o.analysis,createdAt:new Date().toISOString()});modal=null;save();render();toast('Test results saved')}
 }
 async function handleClick(e){const el=e.target.closest('button');if(!el)return;
+ if(el.dataset.caBulkStart!==undefined){await caBulkGenerate();return}
+ if(el.dataset.caBulkStop!==undefined){if(caUI.bulk?.running){caUI.bulk.stop=true;caBulkPaint()}return}
  if(el.dataset.caSync!==undefined){await caSync();return}
  if(el.dataset.caFile){try{const url=await window.SYLLABUS_CLOUD.articleFileUrl(el.dataset.caFile);window.open(url,'_blank','noopener,noreferrer')}catch(e){toast(e.message)}return}
  if(el.dataset.caExport!==undefined){try{const x=await caRequest('/api/export');download(JSON.stringify(x,null,2),`upsc-current-affairs-${todayISO()}.json`,'application/json');toast('Archive metadata and notes exported; PDF bytes not included')}catch(e){toast(e.message)}return}
  if(el.dataset.caFilter!==undefined){caUI.source=$('#ca-source').value;caUI.tag=$('#ca-tag').value;caUI.status=$('#ca-status').value;caUI.search=$('#ca-search').value.trim();caUI.from=$('#ca-from').value;caUI.to=$('#ca-to').value;caUI.expanded=null;await caLoad();return}
- if(el.dataset.caQuick){const id=el.dataset.caQuick;if(caUI.busyId!==null)return;const item=caUI.items.find(x=>x.id===id);if(!item)return;caUI.expanded=id;if(item.analysis){render();return}if(!caUI.ai){caUI.error='Gemini is unavailable; check Cloud connection';render();return}await caMutation(()=>caRequest('/api/articles/'+encodeURIComponent(id)+'/analyze',{method:'POST'}),id);return}
+ if(el.dataset.caQuick){const id=el.dataset.caQuick;if(caUI.busyId!==null||caUI.bulk?.running)return;const item=caUI.items.find(x=>x.id===id);if(!item)return;caUI.expanded=id;if(item.analysis){caStableRender(id);return}if(!caUI.ai){caUI.error='Gemini is unavailable; check Cloud connection';render();return}await caMutation(()=>caRequest('/api/articles/'+encodeURIComponent(id)+'/analyze',{method:'POST'}),id);return}
  if(el.dataset.caDetail){caUI.expanded=caUI.expanded===el.dataset.caDetail?null:el.dataset.caDetail;render();return}
  if(el.dataset.caAnalyze){const id=el.dataset.caAnalyze;await caMutation(()=>caRequest(`/api/articles/${id}/analyze`,{method:'POST'}),id);return}
  if(el.dataset.caStatusAction){const id=el.dataset.caStatusAction,status=el.dataset.caNewStatus;await caMutation(()=>caRequest(`/api/articles/${id}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status})}),id);return}
