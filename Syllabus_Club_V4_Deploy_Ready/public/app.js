@@ -124,8 +124,8 @@ function renderCurrentAffairs(){const all=caUI.items||[];const shown=all.filter(
  const sourceSelect=[['all','All sources'],['PIB','PIB'],['PRS','PRS'],['PDF','My PDFs']].map(([v,t])=>`<option value="${v}" ${caUI.source===v?'selected':''}>${t}</option>`).join('');
  const tagSelect=[['all','All subjects'],...['Polity','Economy','Environment','Geography','Science & Tech','International Relations','History & Culture','Social Issues'].map(t=>[t,t])].map(([v,t])=>`<option value="${h(v)}" ${caUI.tag===v?'selected':''}>${h(t)}</option>`).join('');
  const statusSelect=[['all','Every reading status'],['unread','To read'],['saved','Saved'],['read','Read'],['due','Revision due']].map(([v,t])=>`<option value="${v}" ${caUI.status===v?'selected':''}>${t}</option>`).join('');
- const statusText=caUI.online===null?'Checking your cloud account…':caUI.online?(caUI.ai?'Cloud connected · Gemini ready':'Cloud connected · Gemini key missing'):'Sign in via ☁ CLOUD to access your private feed';
- return `<div class="ca-hero"><div><div class="ca-kicker">✳ THE INTELLIGENCE DESK / UPSC 2027</div><h1>News in.<br><em>Knowledge out.</em></h1><p>Your date-wise official-source inbox. Less doomscrolling, more actual Prelims revision.</p><div class="ca-hero-actions"><button class="ca-sync" data-ca-sync ${!caUI.online||caUI.loading||caUI.bulk?.running?'disabled':''}>${caUI.loading?'Syncing…':'↻ Sync PIB + PRS'}</button><button class="ca-bulk-launch" data-ca-bulk-start type="button" ${!caUI.online||!caUI.ai||caUI.loading||caUI.busyId!==null||caUI.bulk?.running?'disabled':''}>✳ ${caUI.bulk?.running?'Generating notes…':'Generate Notes for All News'}</button><span class="ca-status ${caUI.online?'connected':''}"><i></i>${h(statusText)}</span></div></div><div class="ca-hero-mark">✳<span>THE DAILY<br>DECODE</span></div></div>
+ const statusText=caUI.online===null?'Connecting to your cloud…':caUI.online?(caUI.ai?'Cloud connected · Gemini ready':'Cloud connected · Gemini key missing'):'Cloud offline · Reconnect or sign in';
+ return `<div class="ca-hero"><div><div class="ca-kicker">✳ THE INTELLIGENCE DESK / UPSC 2027</div><h1>News in.<br><em>Knowledge out.</em></h1><p>Your date-wise official-source inbox. Less doomscrolling, more actual Prelims revision.</p><div class="ca-hero-actions"><button class="ca-sync" data-ca-sync ${!caUI.online||caUI.loading||caUI.bulk?.running?'disabled':''}>${caUI.loading?'Syncing…':'↻ Sync PIB + PRS'}</button>${caUI.online===false?'<button class="ca-quiet" data-ca-retry-cloud type="button">↻ Retry Cloud</button>':''}<button class="ca-bulk-launch" data-ca-bulk-start type="button" ${!caUI.online||!caUI.ai||caUI.loading||caUI.busyId!==null||caUI.bulk?.running?'disabled':''}>✳ ${caUI.bulk?.running?'Generating notes…':'Generate Notes for All News'}</button><span class="ca-status ${caUI.online?'connected':''}"><i></i>${h(statusText)}</span></div></div><div class="ca-hero-mark">✳<span>THE DAILY<br>DECODE</span></div></div>
  ${caBulkMarkup()}
  <div class="ca-metrics"><div><span>IN YOUR INBOX</span><strong>${all.length}</strong><small>Official / uploaded sources</small></div><div><span>TO READ</span><strong>${all.filter(x=>x.read_status==='unread').length}</strong><small>Unreviewed entries</small></div><div><span>REVISION DUE</span><strong>${due}</strong><small>Spaced review queue</small></div><div><span>AI STUDY NOTES</span><strong>${all.filter(x=>x.analysis).length}</strong><small>Source-linked notes</small></div></div>
  ${caUI.error?`<div class="ca-message">${h(caUI.error)}</div>`:''}
@@ -228,7 +228,40 @@ async function caBulkGenerate(){
  toast('Gemini batch: '+b.success+' notes saved, '+b.failed+' failed.');
 }
 
-async function caLoad({renderAfter=true}={}){try{const [health,list]=await Promise.all([caRequest('/api/health'),caRequest('/api/articles?'+new URLSearchParams({source:caUI.source,tag:caUI.tag,date_from:caUI.from,date_to:caUI.to,q:caUI.search,limit:'200'}))]);caUI.online=health.online;caUI.ai=health.ai_enabled;caUI.auto=health.auto_sync;caUI.lastSync=health.last_sync;caUI.items=list.items;caUI.error='';}catch(e){caUI.error='Cloud account required or fetch failed: '+e.message;}if(renderAfter&&page==='current')caStableRender()}
+let caLoadEpoch=0;
+async function caLoad({renderAfter=true}={}){
+ const epoch=++caLoadEpoch;
+ try{
+   const cloud=window.SYLLABUS_CLOUD;
+   if(!cloud)throw Error('Cloud module unavailable. Reload the page.');
+   // Cloud startup and session refresh may not have completed when Current Affairs opens.
+   if(cloud.ready){
+     await Promise.race([cloud.ready,new Promise((_,reject)=>setTimeout(
+       ()=>reject(Error('Cloud connection did not finish starting. Retry.')),18000))]);
+   }
+   if(!cloud.loggedIn)throw Error(cloud.status||'Sign in with ☁ Cloud to load your news.');
+   const [health,list]=await Promise.all([
+     caRequest('/api/health'),
+     caRequest('/api/articles?'+new URLSearchParams({
+       source:caUI.source,tag:caUI.tag,date_from:caUI.from,
+       date_to:caUI.to,q:caUI.search,limit:'200'
+     }))
+   ]);
+   if(epoch!==caLoadEpoch)return;
+   caUI.online=health.online===true;
+   caUI.ai=health.ai_enabled===true;
+   caUI.auto=health.auto_sync===true;
+   caUI.lastSync=health.last_sync;
+   caUI.items=list.items||[];
+   caUI.error='';
+ }catch(e){
+   if(epoch!==caLoadEpoch)return;
+   caUI.online=false;
+   caUI.ai=false;
+   caUI.error='Cloud unavailable: '+(e.message||'Network error')+' · Retry connection or sign in.';
+ }
+ if(renderAfter&&page==='current')caStableRender();
+}
 async function caSync(){caUI.loading=true;render();try{const x=await caRequest('/api/refresh',{method:'POST'});caUI.lastSync=x;caUI.error=x.errors?.length?'Some sources were unreachable: '+x.errors.join(' · '):`Sync completed: ${x.added} new entries`;await caLoad();}catch(e){caUI.error=e.message}finally{caUI.loading=false;render()}}
 async function caMutation(fn,id){
  if(caUI.busyId!==null||caUI.bulk?.running)return;
@@ -340,6 +373,7 @@ async function handleSubmit(e){const form=e.target;const formId=form.getAttribut
 async function handleClick(e){const el=e.target.closest('button');if(!el)return;
  if(el.dataset.caBulkStart!==undefined){await caBulkGenerate();return}
  if(el.dataset.caBulkStop!==undefined){if(caUI.bulk?.running){caUI.bulk.stop=true;caBulkPaint()}return}
+ if(el.dataset.caRetryCloud!==undefined){caUI.online=null;caUI.error='';caStableRender();try{await window.SYLLABUS_CLOUD?.reconnect()}catch(e){caUI.error=e.message}await caLoad();return}
  if(el.dataset.caSync!==undefined){await caSync();return}
  if(el.dataset.caFile){try{const url=await window.SYLLABUS_CLOUD.articleFileUrl(el.dataset.caFile);window.open(url,'_blank','noopener,noreferrer')}catch(e){toast(e.message)}return}
  if(el.dataset.caExport!==undefined){try{const x=await caRequest('/api/export');download(JSON.stringify(x,null,2),`upsc-current-affairs-${todayISO()}.json`,'application/json');toast('Archive metadata and notes exported; PDF bytes not included')}catch(e){toast(e.message)}return}
@@ -399,6 +433,9 @@ let inputDebounce;function handleInput(e){if(e.target.id==='topic-search'){query
 document.addEventListener('click',handleClick);document.addEventListener('change',handleChange);document.addEventListener('submit',handleSubmit);document.addEventListener('input',handleInput);document.addEventListener('click',e=>{if(e.target.matches('[data-dismiss]')){modal=null;render()}});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modal){modal=null;render()}else if(e.key==='Escape'&&zenMode){zenMode=false;render()}});
 const alerted=new Set();setInterval(()=>{if(!('Notification'in window)||Notification.permission!=='granted')return;const now=new Date().toISOString().slice(0,16),localNow=todayISO()+'T'+new Date().toTimeString().slice(0,5);state.reminders.filter(r=>!r.done&&r.dueAt<=localNow&&!alerted.has(r.id)).forEach(r=>{alerted.add(r.id);try{new Notification('UPSC reminder',{body:r.title})}catch{}})},60000);
 if(!localStorage.getItem(STORE))save(false);bootTimer();render();
+// A cloud session can finish connecting after the user opens Current Affairs.
+// Refresh the feed whenever the authenticated cloud connection state changes.
+window.addEventListener('syllabus-cloud-ready',()=>{if(page==='current')caLoad();});
 let lastHeartbeat=0;setInterval(()=>{const t=state.timer;if(t?.status==='running'){const secs=getTimerSeconds(),lim=modeLimit[t.mode]||0;if(lim&&secs>=lim){stopTimer(true);return}const remaining=lim?Math.max(0,lim-secs):secs;document.querySelectorAll('[data-clock]').forEach(el=>el.textContent=secFmt(remaining));document.querySelectorAll('[data-timer-meter]').forEach(el=>el.style.width=(lim?Math.min(100,secs/lim*100):Math.min(100,dailyStudied(todayISO())/21600*100))+'%');const amount=shortDuration(dailyStudied(todayISO()));document.querySelectorAll('[data-live-today],[data-live-total],[data-header-time]').forEach(el=>el.textContent=amount);if(Date.now()-lastHeartbeat>9000){t.lastHeartbeat=nowStamp();save(false);lastHeartbeat=Date.now();}}},1000);
 window.addEventListener('pagehide',()=>{if(state.timer?.status==='running')pauseTimer()});window.addEventListener('pageshow',e=>{if(e.persisted)render()});
 })();

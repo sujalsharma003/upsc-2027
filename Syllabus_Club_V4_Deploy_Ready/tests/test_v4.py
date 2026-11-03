@@ -320,3 +320,23 @@ def test_gemini_generation_not_blocked_by_legacy_cap(monkeypatch):
     response=client.post('/api/articles/'+article_id+'/analyze')
     assert response.status_code==200
     assert response.json()['analysis']['provider']=='Gemini'
+
+
+def test_current_affairs_cloud_check_resolves_and_offers_retry():
+    from pathlib import Path
+    code=(Path(__file__).resolve().parents[1]/'public'/'app.js').read_text(encoding='utf-8')
+    assert "caUI.online=false;" in code
+    assert "caUI.ai=false;" in code
+    assert 'cloud.ready' in code
+    assert 'caLoadEpoch' in code
+    assert 'data-ca-retry-cloud' in code
+    assert "window.addEventListener('syllabus-cloud-ready'" in code
+
+def test_cloud_bridge_has_timeout_reconnect_and_preserves_network_failures():
+    from pathlib import Path
+    code=(Path(__file__).resolve().parents[1]/'public'/'cloud-bridge.js').read_text(encoding='utf-8')
+    assert 'fetchWithTimeout' in code
+    assert "window.dispatchEvent(new Event('syllabus-cloud-ready'))" in code
+    assert 'get loggedIn()' in code
+    assert 'reconnect, ready' in code
+    assert "err.status===400||err.status===401" in code
