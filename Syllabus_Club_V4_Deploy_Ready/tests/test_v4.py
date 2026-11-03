@@ -121,3 +121,21 @@ def test_pib_listing_requires_official_date():
     import pytest
     with pytest.raises(ValueError):
         core.parse_pib_listing('<ul><li><a href="/PressReleseDetail.aspx?PRID=1234">Some published release without date</a></li></ul>')
+
+
+def test_prs_highlights_extracts_individual_dated_issue_entries():
+    html='''<h1>October 2026</h1><span><strong>Highlights of this Issue</strong></span>
+    <a href="#key-one"><strong>Cabinet approves a scheme for green industry (p. 4)</strong></a>
+    <p><strong>Cabinet approves a scheme for green industry (p. 4)</strong></p>
+    <a href="#key-two"><strong>GST_Council_recommends"> GST Council recommends several changes (p. 2)</strong></a>'''
+    rows=core.parse_prs_highlights(
+       html,'https://prsindia.org/policy/monthly-policy-review/october-2026','2026-10')
+    assert len(rows)==2
+    assert rows[0]['date_precision']=='month' and rows[0]['published_date']=='2026-10-01'
+    assert rows[1]['title']=='PRS: GST Council recommends several changes'
+    assert all(x['url']=='https://prsindia.org/policy/monthly-policy-review/october-2026' for x in rows)
+
+def test_prs_highlights_rejects_external_report():
+    import pytest
+    with pytest.raises(ValueError):
+        core.parse_prs_highlights('Highlights of this Issue','https://example.com/report','2026-10')
