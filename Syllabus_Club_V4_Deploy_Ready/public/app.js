@@ -181,18 +181,20 @@ async function caBulkGenerate(){
  if(!caUI.ai||!caUI.online){caUI.error='Sign in and configure Gemini before generating notes.';caStableRender();return}
  let pending=[],remaining=0,dailyLimit=10;
  try{
-   const [quota,listing]=await Promise.all([
-     caRequest('/api/ai/usage'),
-     caRequest('/api/articles?limit=300')
-   ]);
-   dailyLimit=quota.limit;
-   remaining=quota.remaining;
-   pending=(listing.items||[]).filter(a=>!a.analysis&&['PIB','PRS','PDF'].includes(a.source));
+   const quota=await caRequest('/api/ai/usage');
+   dailyLimit=Number(quota.limit)||10;
+   remaining=Number(quota.remaining)||0;
+   for(let offset=0;offset<=9900;offset+=300){
+     const listing=await caRequest('/api/articles?limit=300&offset='+offset);
+     const batch=listing.items||[];
+     pending.push(...batch.filter(a=>!a.analysis&&['PIB','PRS','PDF'].includes(a.source)));
+     if(batch.length<300)break;
+   }
  }catch(e){caUI.error='Unable to prepare batch: '+e.message;caStableRender();return}
  if(!pending.length){caUI.error='All currently loaded news already have Gemini notes.';caStableRender();return}
  if(remaining<=0){caUI.error='Daily Gemini limit reached ('+dailyLimit+' generations). Try again tomorrow.';caStableRender();return}
  const amount=Math.min(pending.length,remaining);
- if(!confirm('Generate Gemini notes for '+amount+' news items now?\\n'+pending.length+' do not have notes; today you have '+remaining+' of '+dailyLimit+' generations remaining.\\nEach generation may use Gemini API quota or incur charges. Notes will be saved to Supabase.\\n\\nThis batch runs in this browser, so keep the tab open.'))return;
+ if(!confirm('Generate Gemini notes for '+amount+' news items now?\n'+pending.length+' do not have notes; today you have '+remaining+' of '+dailyLimit+' generations remaining.\nEach generation may use Gemini API quota or incur charges. Notes will be saved to Supabase.\n\nThis batch runs in this browser, so keep the tab open.'))return;
  const queue=pending.slice(0,amount);
  const b={running:true,stop:false,total:queue.length,done:0,success:0,failed:0,current:'Preparing first article…'};
  caUI.bulk=b;caUI.error='';

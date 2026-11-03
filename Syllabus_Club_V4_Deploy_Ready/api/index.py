@@ -101,7 +101,7 @@ def state_save(body:StateUpdate,user=Depends(get_user)):
     return {'saved':True,'revision':revision}
 
 @app.get('/api/articles')
-def articles(source:str='all',tag:str='all',date_from:str='',date_to:str='',q:str='',limit:int=200,user=Depends(get_user)):
+def articles(source:str='all',tag:str='all',date_from:str='',date_to:str='',q:str='',limit:int=200,offset:int=0,user=Depends(get_user)):
     try:
         filters={'or':f'(owner_id.is.null,owner_id.eq.{user["id"]})',
              'order':'published_date.desc,added_at.desc',
@@ -115,6 +115,8 @@ def articles(source:str='all',tag:str='all',date_from:str='',date_to:str='',q:st
                 try:conditions.append('published_date.'+op+'.'+date.fromisoformat(value).isoformat())
                 except ValueError:raise HTTPException(422,'Invalid publication date filter')
         if conditions: filters['and']='('+','.join(conditions)+')'
+        if offset<0 or offset>10000:raise HTTPException(422,'Invalid article pagination offset')
+        filters['offset']=str(offset)
         rows=c.rest_rows('articles',filters,400)
         progress={p['article_id']:p for p in c.progress_rows(user['id'])}
     except RuntimeError as e:raise hidden(e)

@@ -293,6 +293,6 @@ def test_current_affairs_batch_renders_progress_without_changing_card_order():
     assert 'data-ca-bulk-meter' in script
     assert "caRequest('/api/ai/usage')" in script
     assert 'caBulkPaint()' in script
-    assert 'caUI.busyId=null;if(page===\\'current\\')caStableRender(id)' in script
+    assert "caUI.busyId=null;if(page==='current')caStableRender(id)" in script
     assert 'await caLoad({renderAfter:false})' in script
     assert 'Daily Gemini limit reached' in script
