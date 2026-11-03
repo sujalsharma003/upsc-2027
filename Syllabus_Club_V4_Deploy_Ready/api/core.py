@@ -12,9 +12,10 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-PIB = 'https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=1'
+PIB = 'https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3&reg=48'
 # PIB publishes multiple official English feed listings; try a second one only if the first fails.
-PIB_ALTERNATE = 'https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3'
+PIB_ALTERNATE = 'https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3&reg=3'
+PIB_LEGACY = 'https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=1'
 PRS = 'https://prsindia.org/policy/monthly-policy-review'
 ALLOWED = {'pib.gov.in', 'www.pib.gov.in', 'prsindia.org', 'www.prsindia.org'}
 TAG_TERMS = {
@@ -174,19 +175,61 @@ def safe_fetch(url):
             return r.text
     raise ValueError('Official source exceeded safe redirect limit')
 
+def _pib_date(raw):
+    """Accept explicit publication dates only; never substitute import time."""
+    raw=(raw or '').strip()
+    if not raw:return None
+    try:return parsedate_to_datetime(raw).date().isoformat()
+    except (TypeError,ValueError,IndexError):pass
+    iso=re.search(r'(?<!\d)(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])(?!\d)',raw)
+    if iso:
+        try:return date(int(iso.group(1)),int(iso.group(2)),int(iso.group(3))).isoformat()
+        except ValueError:pass
+    for fmt in ('%d-%b-%Y','%d %b %Y','%d-%B-%Y','%d %B %Y','%d/%m/%Y','%d-%m-%Y','%a, %d %b %Y %H:%M:%S %Z','%a, %d %b %Y %H:%M:%S'):
+        try:return datetime.strptime(raw,fmt).date().isoformat()
+        except ValueError:continue
+    return None
+
+def _pib_link(raw):
+    raw=(raw or '').strip()
+    if not raw:return None
+    parsed=urlparse(raw)
+    if parsed.scheme=='http' and parsed.hostname in {'pib.gov.in','www.pib.gov.in'} and parsed.port in (None,80):
+        raw='https:'+raw[5:]
+    elif not parsed.scheme and raw.startswith('/'):
+        raw=urljoin('https://www.pib.gov.in',raw)
+    return raw if safe_source(raw) else None
+
 def parse_pib(xml):
-    items=[]
+    """Parse official RSS/Atom without silently dropping dated articles.
+
+    Safe-link normalization is limited to PIB's own host; invalid dates remain
+    rejected rather than assigning an invented publication date.
+    """
     root=ET.fromstring(xml)
-    for it in root.findall('.//item'):
-        f={el.tag.split('}')[-1].lower():''.join(el.itertext()).strip() for el in it}
-        title=f.get('title','').strip()
-        url=f.get('link','')
-        try: day=parsedate_to_datetime(f.get('pubdate','')).date().isoformat()
-        except Exception:continue
-        if title and safe_source(url):
-            desc=BeautifulSoup(f.get('description',''),'html.parser').get_text(' ',strip=True)
-            items.append({'title':title,'url':url,'published_date':day,'date_precision':'day','source':'PIB','source_text':desc})
-    return items
+    entries=[el for el in root.iter() if el.tag.split('}')[-1].lower() in ('item','entry')]
+    stats={'total':len(entries),'dates':0,'links':0,'titles':0}
+    out=[]
+    for it in entries:
+        fields={}
+        for el in it:
+            k=el.tag.split('}')[-1].lower()
+            if k=='link' and el.attrib.get('href'):
+                fields[k]=el.attrib['href'].strip()
+            else:
+                fields[k]=''.join(el.itertext()).strip()
+        title=BeautifulSoup(fields.get('title',''),'html.parser').get_text(' ',strip=True)
+        url=_pib_link(fields.get('link') or fields.get('guid') or fields.get('id'))
+        day=_pib_date(fields.get('pubdate') or fields.get('published') or fields.get('updated') or fields.get('date') or fields.get('dc:date'))
+        if title:stats['titles']+=1
+        if url:stats['links']+=1
+        if day:stats['dates']+=1
+        if not (title and url and day):continue
+        desc=BeautifulSoup(fields.get('description') or fields.get('summary') or fields.get('content',''),'html.parser').get_text(' ',strip=True)
+        out.append({'title':title,'url':url,'published_date':day,'date_precision':'day','source':'PIB','source_text':desc})
+    if not out:
+        raise ValueError('PIB feed items={total}, dated={dates}, valid_links={links}, titled={titles}'.format(**stats))
+    return out
 
 def parse_prs(html):
     soup=BeautifulSoup(html,'html.parser')
@@ -220,7 +263,7 @@ def ingest_public_sources():
     for source,url,parser,limit in [('PIB',PIB,parse_pib,45),('PRS',PRS,parse_prs,8)]:
         try:
             # Try PIB's second official English feed only when primary fails/has no items.
-            urls=[PIB,PIB_ALTERNATE] if source=='PIB' else [url]
+            urls=[PIB,PIB_ALTERNATE,PIB_LEGACY] if source=='PIB' else [url]
             parsed=[]
             last_error=None
             for source_url in urls:
@@ -240,7 +283,7 @@ def ingest_public_sources():
             result['added']+=len(added)
             result['sources'][source]={'found':len(rows),'added':len(added)}
         except (RuntimeError,ValueError,httpx.HTTPError,ET.ParseError) as e:
-            detail=f'HTTP {e.response.status_code}' if isinstance(e,httpx.HTTPStatusError) else str(e)[:75] if isinstance(e,ValueError) else type(e).__name__
+            detail=f'HTTP {e.response.status_code}' if isinstance(e,httpx.HTTPStatusError) else str(e)[:150] if isinstance(e,ValueError) else type(e).__name__
             result['errors'].append(f'{source}: {detail}')
     return result
 
