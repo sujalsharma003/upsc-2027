@@ -340,3 +340,57 @@ def test_cloud_bridge_has_timeout_reconnect_and_preserves_network_failures():
     assert 'get loggedIn()' in code
     assert 'reconnect, ready' in code
     assert "err.status===400||err.status===401" in code
+
+
+def test_prelims_practice_v9_integrity():
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[1]
+    code=(root/'public'/'app.js').read_text(encoding='utf-8')
+    assert "['practice','◉','Practice Studio']" in code
+    assert 'function renderPractice()' in code
+    assert 'function practiceQuestionsFor(' in code
+    assert "analysis.mcqs" in code
+    assert 'function practiceNoteWeak(' in code
+    assert 'function practiceAnswer(' in code
+    assert 'function practiceNext(' in code
+    assert 'state.practiceHistory.unshift' in code
+    assert 'state.mistakeLog.unshift' in code
+    assert 'practiceRecallSelect' in code
+    assert 'practiceLinkMistake' in code
+    assert 'Practice Studio' in code
+    assert 'practice:renderPractice' in code
+
+def test_smart_revision_v9_all_subjects():
+    from pathlib import Path
+    code=(Path(__file__).resolve().parents[1]/'public'/'app.js').read_text(encoding='utf-8')
+    assert 'REVISION_INTERVALS=[1,3,7,15,30,60]' in code
+    assert 'function gradeRecall(' in code
+    assert "revisionFilter==='unstarted'" in code
+    assert "revisionFilter==='weak'" in code
+    assert 'data-recall-hard=' in code
+    assert 'data-recall-good=' in code
+    assert 'data-revision-more' in code
+    assert 'All topics' in code
+    assert 'Weak topics' in code
+
+def test_gemini_checkpoint_v9_resume_and_source_safety():
+    from pathlib import Path
+    code=(Path(__file__).resolve().parents[1]/'public'/'app.js').read_text(encoding='utf-8')
+    assert 'function caSaveCheckpoint(' in code
+    assert 'state.aiBatchCheckpoint=cp;save()' in code
+    assert "caBulkGenerate(resume=false)" in code
+    assert "data-ca-bulk-resume" in code
+    assert "data-ca-bulk-dismiss" in code
+    assert 'completedIds' in code
+    assert "if(!completed.has(id)&&eligible.get(id)?.analysis)" in code
+    assert 'caSaveCheckpoint(b);caBulkPaint()' in code
+    assert 'Gemini API quotas and possible billing charges apply' in code
+
+def test_new_study_state_fields_are_optional_to_old_snapshots():
+    from pathlib import Path
+    code=(Path(__file__).resolve().parents[1]/'public'/'app.js').read_text(encoding='utf-8')
+    assert 'if(!Array.isArray(state.practiceHistory))' in code
+    assert 'if(!Array.isArray(state.mistakeLog))' in code
+    assert 'if(!state.topicWeakness' in code
+    assert 'if(!state.activePractice' in code
+    assert 'if(!state.aiBatchCheckpoint' in code

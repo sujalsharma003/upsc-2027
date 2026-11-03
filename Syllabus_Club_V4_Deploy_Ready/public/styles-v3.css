@@ -68,3 +68,59 @@
 .ca-bulk-stop:disabled{opacity:.55;cursor:not-allowed}
 .ca-article[aria-busy=true]{border-color:#c6b3ff;box-shadow:0 0 0 1px #9f84cf50}
 @media(max-width:700px){.ca-bulk-launch,.ca-sync{flex:1 1 145px}.ca-bulk-panel{padding:16px}}
+
+
+/* V9 — Prelims Practice Studio, weak-topic cues, full syllabus revision calendar */
+.practice-card,.revision-calendar{padding:22px 24px;border:1px solid #454253;border-radius:17px;background:#22232d;margin-top:18px;min-width:0}
+.practice-card .section-heading,.revision-calendar .section-heading{margin-top:0}
+.practice-card h2{font-size:19px;line-height:1.35;margin:0 0 10px}
+.practice-card h3{font-size:18px}
+.practice-filters{display:flex;gap:10px;flex-wrap:wrap;margin:16px 0}
+.practice-filters .select{flex:1 1 165px;max-width:360px}
+.revision-calendar{background:linear-gradient(125deg,#212238,#23282d)}
+.revision-calendar-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px}
+.revision-day{min-height:93px;padding:12px 13px;background:#171a26;border:1px solid #414056;border-radius:11px;display:grid;gap:5px}
+.revision-day strong{color:#dffca1;font-size:12px}
+.revision-day span{color:#d1c9ea;font-size:11px}
+.revision-day small{color:#b8b8c7;font-size:10px;line-height:1.45}
+.revision-topic{align-items:center;flex-wrap:wrap;gap:10px}
+.revision-actions{display:flex;flex-wrap:wrap;gap:7px}
+.revision-actions .outline-btn,.revision-actions .primary-btn{font-size:10px;padding:8px 10px;white-space:nowrap}
+.practice-more{display:flex;justify-content:center;padding:15px}
+.practice-quiz-meta{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:10px;font-weight:900;letter-spacing:.6px;color:#d4c5ff;margin:14px 0}
+.practice-question{color:#f4efff;line-height:1.45;margin:18px 0}
+.practice-meter{height:7px;background:#10111c;border-radius:12px;overflow:hidden}
+.practice-meter i{display:block;height:100%;background:#c7fc97;border-radius:12px;transition:width .2s}
+.practice-options{display:grid;gap:9px;margin:14px 0}
+.practice-option{width:100%;display:flex;align-items:flex-start;gap:13px;text-align:left;background:#2d2d3a;border:1px solid #514b68;color:#f0ebfa;padding:13px 15px;border-radius:11px;font-size:12px;line-height:1.6;cursor:pointer}
+.practice-option:hover:not(:disabled){border-color:#d2bfff;background:#3b344a}
+.practice-option strong{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;flex:none;border-radius:6px;background:#39394f;color:#d7d8e9}
+.practice-option:disabled{cursor:default;opacity:.85}
+.practice-option.correct{background:#284130;border-color:#87c48c}
+.practice-option.incorrect{background:#4c292f;border-color:#d08a92}
+.practice-explanation{border-radius:10px;padding:13px 15px;background:#1c302c;border:1px solid #5d8b73;margin:15px 0;color:#e4f3d7;font-size:12px}
+.practice-explanation strong{color:#d5fcac}
+.practice-explanation p{margin:9px 0 0;line-height:1.65}
+.practice-source{font-size:11px;color:#aaadc1;line-height:1.5;margin:14px 0}
+.practice-source a{color:#d5baff;text-decoration:underline}
+.practice-recall-focus{background:#1b202b;border:1px solid #535273;border-radius:14px;padding:17px 19px;margin:15px 0}
+.practice-recall-focus h3{font-size:19px;margin:10px 0}
+.practice-recall-focus p{font-size:12px;color:#c0c6d3;line-height:1.6}
+.practice-recall-topics,.practice-weak-grid,.practice-weak-subjects{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.practice-recall-pick{background:#2d2c3d;color:#e5dcf6;border:1px solid #615d80;border-radius:9px;padding:9px 12px;font-size:11px;text-align:left;line-height:1.45;cursor:pointer}
+.practice-recall-pick:hover{border-color:#d8c4ff;background:#3a3650}
+.practice-mistake{border-bottom:1px solid #41404e;padding:16px 0}
+.practice-mistake:last-child{border-bottom:0}
+.practice-mistake strong{color:#faf8ff;font-size:12px}
+.practice-mistake p{font-size:11px;line-height:1.6;margin:9px 0}
+.practice-link-label{display:grid;gap:7px;font-size:11px;color:#d3c5fa;margin-top:13px;max-width:620px}
+.practice-link-label .select{max-width:100%;width:100%}
+.ca-bulk-resume{padding:9px 13px;background:#bfa5f1;color:#1d1530;border:1px solid #ded1ff;border-radius:9px;font-weight:900;font-size:11px;cursor:pointer;margin-top:8px}
+.ca-bulk-resume:hover{filter:brightness(1.07)}
+@media(max-width:720px){
+ .practice-card,.revision-calendar{padding:16px}
+ .practice-filters .select{max-width:none}
+ .revision-actions{width:100%;justify-content:flex-start}
+ .practice-option{padding:11px}
+ .practice-recall-focus{padding:13px}
+}
