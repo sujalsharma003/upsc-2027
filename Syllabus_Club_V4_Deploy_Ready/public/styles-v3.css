@@ -47,3 +47,5 @@
 .ca-drill-index{background:#c8f791;color:#15191c;font-size:10px;flex-shrink:0;display:inline-grid;place-items:center;border-radius:50%;height:19px;width:19px;font-weight:800}
 .ca-guide-warning{border-top:1px solid #465043;padding-top:12px;font-size:11px;line-height:1.5;color:#c4d3ba;margin:13px 0 0}
 @media(max-width:700px){.ca-guide{padding:16px}.ca-guide-head span{font-size:9px}}
+
+.ca-actions .ca-alt{background:#c6b3ff;color:#201a30}.ca-actions .ca-alt:hover:not(:disabled){filter:brightness(1.07)}
