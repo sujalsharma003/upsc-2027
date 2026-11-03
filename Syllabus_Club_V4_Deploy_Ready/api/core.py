@@ -8,7 +8,7 @@ import uuid
 import xml.etree.ElementTree as ET
 from datetime import date, datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, parse_qs
 import httpx
 from bs4 import BeautifulSoup
 
@@ -16,6 +16,7 @@ PIB = 'https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3&reg=48'
 # PIB publishes multiple official English feed listings; try a second one only if the first fails.
 PIB_ALTERNATE = 'https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3&reg=3'
 PIB_LEGACY = 'https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=1'
+PIB_ALL = 'https://www.pib.gov.in/AllRelease.aspx?lang=1&reg=1'
 PRS = 'https://prsindia.org/policy/monthly-policy-review'
 ALLOWED = {'pib.gov.in', 'www.pib.gov.in', 'prsindia.org', 'www.prsindia.org'}
 TAG_TERMS = {
@@ -231,6 +232,51 @@ def parse_pib(xml):
         raise ValueError('PIB feed items={total}, dated={dates}, valid_links={links}, titled={titles}'.format(**stats))
     return out
 
+
+def parse_pib_listing(html):
+    """Parse PIB's official All Releases listing when its RSS feeds are empty.
+
+    Never infer the publication date from today's date or the import timestamp.
+    Source links must remain HTTPS PIB press releases with a numeric PRID.
+    """
+    soup=BeautifulSoup(html,'html.parser')
+    out=[]
+    seen=set()
+    for a in soup.select('a[href]'):
+        title=a.get_text(' ',strip=True)
+        if len(title)<14:continue
+        raw_href=(a.get('href') or '').strip()
+        if not raw_href or raw_href.startswith(('javascript:','#')):continue
+        candidate=urljoin(PIB_ALL,raw_href)
+        p=urlparse(candidate)
+        if not safe_source(candidate):continue
+        if 'pressreleasepage.aspx' not in p.path.lower():continue
+        if not any(k.lower()=='prid' and v and v[0].isdigit() for k,v in parse_qs(p.query).items()):continue
+        posted=None
+        node=a
+        for _ in range(4):
+            node=node.parent
+            if node is None or node.name in ('body','html'):break
+            snippet=node.get_text(' ',strip=True)
+            if len(snippet)>1800:break
+            matches=re.findall(r'Posted\s*on\s*:\s*(\d{1,2}\s+[A-Za-z]+\s+20\d{2})',snippet,re.I)
+            valid={_pib_date(x) for x in matches}
+            valid.discard(None)
+            if len(valid)==1:
+                posted=next(iter(valid))
+                break
+            if len(valid)>1:break
+        if not posted:continue
+        normal_url=p._replace(fragment='').geturl()
+        if normal_url in seen:continue
+        seen.add(normal_url)
+        out.append({'title':title[:450],'url':normal_url,'published_date':posted,
+                    'date_precision':'day','source':'PIB',
+                    'source_text':'Official PIB release; open the original source for complete details.'})
+    if not out:
+        raise ValueError('PIB All Releases page supplied no dated official PRID links')
+    return sorted(out,key=lambda x:x['published_date'],reverse=True)
+
 def parse_prs(html):
     soup=BeautifulSoup(html,'html.parser')
     months={m:i for i,m in enumerate(['january','february','march','april','may','june','july','august','september','october','november','december'],1)}
@@ -273,6 +319,11 @@ def ingest_public_sources():
                     if not parsed:
                         raise ValueError('No valid articles found in official source response')
                     break
+                except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                    last_error=e
+            if not parsed and source=='PIB':
+                try:
+                    parsed=parse_pib_listing(safe_fetch(PIB_ALL))[:limit]
                 except (ValueError,httpx.HTTPError,ET.ParseError) as e:
                     last_error=e
             if not parsed:
