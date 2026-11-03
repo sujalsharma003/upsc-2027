@@ -234,48 +234,53 @@ def parse_pib(xml):
 
 
 def parse_pib_listing(html):
-    """Parse PIB's official All Releases listing when its RSS feeds are empty.
+    """Extract published, source-linked PIB releases from official All Releases HTML.
 
-    Never infer the publication date from today's date or the import timestamp.
-    Source links must remain HTTPS PIB press releases with a numeric PRID.
+    PIB uses /PressReleseDetail.aspx?PRID=... and <li> cards with a
+    span.publishdatesmall. The link must be to an allowed official host and
+    dates are read from the specific release's <li>, never guessed.
     """
     soup=BeautifulSoup(html,'html.parser')
-    out=[]
+    items=[]
     seen=set()
-    for a in soup.select('a[href]'):
-        title=a.get_text(' ',strip=True)
-        if len(title)<14:continue
-        raw_href=(a.get('href') or '').strip()
-        if not raw_href or raw_href.startswith(('javascript:','#')):continue
-        candidate=urljoin(PIB_ALL,raw_href)
-        p=urlparse(candidate)
-        if not safe_source(candidate):continue
-        if 'pressreleasepage.aspx' not in p.path.lower():continue
-        if not any(k.lower()=='prid' and v and v[0].isdigit() for k,v in parse_qs(p.query).items()):continue
-        posted=None
-        node=a
-        for _ in range(4):
-            node=node.parent
-            if node is None or node.name in ('body','html'):break
-            snippet=node.get_text(' ',strip=True)
-            if len(snippet)>1800:break
-            matches=re.findall(r'Posted\s*on\s*:\s*(\d{1,2}\s+[A-Za-z]+\s+20\d{2})',snippet,re.I)
-            valid={_pib_date(x) for x in matches}
-            valid.discard(None)
-            if len(valid)==1:
-                posted=next(iter(valid))
-                break
-            if len(valid)>1:break
-        if not posted:continue
-        normal_url=p._replace(fragment='').geturl()
-        if normal_url in seen:continue
-        seen.add(normal_url)
-        out.append({'title':title[:450],'url':normal_url,'published_date':posted,
-                    'date_precision':'day','source':'PIB',
-                    'source_text':'Official PIB release; open the original source for complete details.'})
-    if not out:
-        raise ValueError('PIB All Releases page supplied no dated official PRID links')
-    return sorted(out,key=lambda x:x['published_date'],reverse=True)
+    for li in soup.select('li'):
+        link=None
+        for a in li.select('a[href]'):
+            href=(a.get('href') or '').strip()
+            if not href:continue
+            resolved=_pib_link(href)
+            if not resolved:continue
+            p=urlparse(resolved)
+            if not re.search(r'press(?:relese|release)(?:detail|page|iframepage)\.aspx$',p.path,re.I):
+                continue
+            params={k.lower():v for k,v in parse_qs(p.query).items()}
+            prid=(params.get('prid') or [''])[0]
+            if not prid.isdigit():continue
+            title=a.get('title') or a.get_text(' ',strip=True)
+            title=BeautifulSoup(title,'html.parser').get_text(' ',strip=True)
+            if len(title)<12:continue
+            link=(resolved,title,prid)
+            break
+        if not link:continue
+        date_tag=li.select_one('.publishdatesmall')
+        date_text=date_tag.get_text(' ',strip=True) if date_tag else ''
+        if not date_text:
+            text=li.get_text(' ',strip=True)
+            match=re.search(r'Posted\s*on\s*:\s*(\d{1,2}\s+[A-Za-z]+\s+20\d{2})',text,re.I)
+            date_text=match.group(1) if match else ''
+        date_text=re.sub(r'^\s*Posted\s*on\s*:\s*','',date_text,flags=re.I)
+        pubdate=_pib_date(date_text)
+        if not pubdate:continue
+        url,title,prid=link
+        if prid in seen:continue
+        seen.add(prid)
+        items.append({'title':title[:450],'url':url,'published_date':pubdate,
+                      'date_precision':'day','source':'PIB',
+                      'source_text':'Official PIB press release. Refer to the source link for full details.'})
+    if not items:
+        raise ValueError(f'PIB listing: no dated releases; found {len(soup.select("li"))} li elements')
+    return sorted(items,key=lambda x:x['published_date'],reverse=True)
+
 
 def parse_prs(html):
     soup=BeautifulSoup(html,'html.parser')
