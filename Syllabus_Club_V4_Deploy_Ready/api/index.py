@@ -329,3 +329,49 @@ def api_root():
 
 
 
+
+
+@app.get('/api/_source_html_probe_v6')
+def _source_html_probe_v6():
+    """Preview-only inspection of two fixed, public official source pages."""
+    from bs4 import BeautifulSoup
+    examples=(
+      ('PIB','https://www.pib.gov.in/PressReleseDetail.aspx?PRID=2332011','Pune Metro'),
+      ('PRS','https://prsindia.org/policy/monthly-policy-review/october-2026','National Social Assistance Programme')
+    )
+    out={}
+    for key,url,needle in examples:
+        try:
+            html=c.safe_fetch(url)
+            soup=BeautifulSoup(html,'html.parser')
+            selectors=('article','main','#content','#ContentPlaceHolder1_ReleaseDetails',
+                '.content-area','.release-content','.content','#ReleaseDetails',
+                '.pressRelease','.relcontent','.text-justify',
+                '.field-item','.main-container','.node__content','p','h1','h2','h3')
+            summary={}
+            for sel in selectors:
+                arr=soup.select(sel)
+                summary[sel]={'count':len(arr),'largest':sorted(
+                  [{'len':len(x.get_text(' ',strip=True)), 'start':x.get_text(' ',strip=True)[:130],
+                    'class':x.get('class') or x.get('id')} for x in arr],
+                  key=lambda x:x['len'],reverse=True)[:2]}
+            matches=[]
+            for el in soup.find_all(string=lambda v:v and needle.lower() in str(v).lower()):
+                node=el.parent
+                chain=[]
+                for _ in range(5):
+                    if node is None:break
+                    t=node.get_text(' ',strip=True)
+                    chain.append({'tag':node.name,'attrs':{'id':node.get('id'),'class':node.get('class')},
+                                  'len':len(t),'start':t[:160],'end':t[-110:]})
+                    node=node.parent
+                matches.append(chain)
+                if len(matches)>=2:break
+            out[key]={'html_len':len(html),'title':soup.title.get_text(' ',strip=True)[:120] if soup.title else '',
+                'selectors':summary,'matched':matches,
+                'body_len':len(soup.get_text(' ',strip=True)),
+                'body_start':soup.get_text(' ',strip=True)[:300],
+                'body_end':soup.get_text(' ',strip=True)[-300:]}
+        except Exception as exc:
+            out[key]={'error':type(exc).__name__+': '+str(exc)[:130]}
+    return out
