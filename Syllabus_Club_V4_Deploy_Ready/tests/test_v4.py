@@ -270,3 +270,29 @@ def test_source_host_and_release_id_are_verified():
         fetch_verified_article(
             {'source':'PIB','url':'https://evil.example/PressReleseDetail.aspx?PRID=123',
              'title':'Government announcement'}, lambda url:'unreachable')
+
+
+def test_bulk_gemini_quota_endpoint_is_authenticated_and_bounded(monkeypatch):
+    signed_in()
+    monkeypatch.setenv('GEMINI_API_KEY','set-for-test')
+    monkeypatch.setenv('DAILY_AI_LIMIT','10')
+    monkeypatch.setattr(core,'rest_rows',lambda table,params,limit: [{'id':'used'}]*3
+        if table=='ai_usage' else [])
+    response=client.get('/api/ai/usage')
+    assert response.status_code==200
+    assert response.json()=={'used':3,'limit':10,'remaining':7,'enabled':True}
+    app.dependency_overrides.clear()
+    assert client.get('/api/ai/usage').status_code==401
+
+def test_current_affairs_batch_renders_progress_without_changing_card_order():
+    from pathlib import Path
+    script=(Path(__file__).resolve().parents[1]/'public'/'app.js').read_text(encoding='utf-8')
+    assert 'data-ca-item=' in script and 'function caStableRender(' in script
+    assert 'data-ca-bulk-start' in script
+    assert 'data-ca-bulk-stop' in script
+    assert 'data-ca-bulk-meter' in script
+    assert "caRequest('/api/ai/usage')" in script
+    assert 'caBulkPaint()' in script
+    assert 'caUI.busyId=null;if(page===\\'current\\')caStableRender(id)' in script
+    assert 'await caLoad({renderAfter:false})' in script
+    assert 'Daily Gemini limit reached' in script

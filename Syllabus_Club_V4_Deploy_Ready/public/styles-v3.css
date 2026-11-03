@@ -49,3 +49,22 @@
 @media(max-width:700px){.ca-guide{padding:16px}.ca-guide-head span{font-size:9px}}
 
 .ca-actions .ca-alt{background:#c6b3ff;color:#201a30}.ca-actions .ca-alt:hover:not(:disabled){filter:brightness(1.07)}
+
+/* V7 Current Affairs: visible batch controls, progress and stable card anchors */
+.ca-hero-actions{flex-wrap:wrap;align-items:center}
+.ca-bulk-launch{display:inline-flex;align-items:center;justify-content:center;min-height:39px;padding:10px 16px;border-radius:11px;background:linear-gradient(100deg,#c7b0ff,#e0cfff);border:1px solid #e7dbff;color:#21192e;font-weight:900;font-size:11px;cursor:pointer;transition:filter .15s ease,transform .15s ease}
+.ca-bulk-launch:hover:not(:disabled){filter:brightness(1.07);transform:translateY(-1px)}
+.ca-bulk-launch:disabled{opacity:.52;cursor:not-allowed}
+.ca-bulk-panel{margin:16px 0 20px;padding:20px 22px;border-radius:17px;background:linear-gradient(135deg,#25213c,#1a1d28);border:1px solid #7469a1;color:#eee9fc;box-shadow:0 12px 30px #09091a28}
+.ca-bulk-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:11px;letter-spacing:1.2px}
+.ca-bulk-head strong{color:#e3d5ff}
+.ca-bulk-head span{font-size:18px;font-weight:900;color:#d9fc8e;letter-spacing:-.5px}
+.ca-bulk-meter{height:11px;overflow:hidden;background:#13111f;border-radius:40px;margin:14px 0 11px;border:1px solid #383352}
+.ca-bulk-meter i{display:block;background:linear-gradient(90deg,#9f85ed,#d6fb92);border-radius:40px;height:100%;transition:width .25s ease}
+.ca-bulk-info{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;font-weight:700;font-size:11px;color:#d4cae9}
+.ca-bulk-current{font-size:11px;line-height:1.5;color:#b5b6d0;min-height:16px;margin:10px 0 5px;overflow-wrap:anywhere}
+.ca-bulk-help{font-size:10px;color:#a6a0bc;line-height:1.5;margin:9px 0 0}
+.ca-bulk-stop{margin-top:5px;padding:8px 13px;background:#3b2b3d;color:#f4c7ce;border:1px solid #7b4b62;border-radius:9px;cursor:pointer;font-size:11px;font-weight:800}
+.ca-bulk-stop:disabled{opacity:.55;cursor:not-allowed}
+.ca-article[aria-busy=true]{border-color:#c6b3ff;box-shadow:0 0 0 1px #9f84cf50}
+@media(max-width:700px){.ca-bulk-launch,.ca-sync{flex:1 1 145px}.ca-bulk-panel{padding:16px}}

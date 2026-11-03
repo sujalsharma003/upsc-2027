@@ -196,7 +196,7 @@ async function caBulkGenerate(){
  const queue=pending.slice(0,amount);
  const b={running:true,stop:false,total:queue.length,done:0,success:0,failed:0,current:'Preparing first article…'};
  caUI.bulk=b;caUI.error='';
- caStableRender();
+ render();
  let consecutiveErrors=0;
  for(const row of queue){
    if(b.stop)break;
@@ -227,7 +227,7 @@ async function caBulkGenerate(){
  toast('Gemini batch: '+b.success+' notes saved, '+b.failed+' failed.');
 }
 
-async function caLoad({renderAfter=true}={}){try{const [health,list]=await Promise.all([caRequest('/api/health'),caRequest('/api/articles?'+new URLSearchParams({source:caUI.source,tag:caUI.tag,date_date_from:caUI.from,date_to:caUI.to,q:caUI.search,limit:'200'}))]);caUI.online=health.online;caUI.ai=health.ai_enabled;caUI.auto=health.auto_sync;caUI.lastSync=health.last_sync;caUI.items=list.items;caUI.error='';}catch(e){caUI.error='Cloud account required or fetch failed: '+e.message;}if(renderAfter&&page==='current')caStableRender()}
+async function caLoad({renderAfter=true}={}){try{const [health,list]=await Promise.all([caRequest('/api/health'),caRequest('/api/articles?'+new URLSearchParams({source:caUI.source,tag:caUI.tag,date_from:caUI.from,date_to:caUI.to,q:caUI.search,limit:'200'}))]);caUI.online=health.online;caUI.ai=health.ai_enabled;caUI.auto=health.auto_sync;caUI.lastSync=health.last_sync;caUI.items=list.items;caUI.error='';}catch(e){caUI.error='Cloud account required or fetch failed: '+e.message;}if(renderAfter&&page==='current')caStableRender()}
 async function caSync(){caUI.loading=true;render();try{const x=await caRequest('/api/refresh',{method:'POST'});caUI.lastSync=x;caUI.error=x.errors?.length?'Some sources were unreachable: '+x.errors.join(' · '):`Sync completed: ${x.added} new entries`;await caLoad();}catch(e){caUI.error=e.message}finally{caUI.loading=false;render()}}
 async function caMutation(fn,id){
  if(caUI.busyId!==null||caUI.bulk?.running)return;
