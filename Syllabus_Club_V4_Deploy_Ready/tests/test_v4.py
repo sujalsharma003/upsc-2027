@@ -104,3 +104,20 @@ def test_signed_url_prefix(monkeypatch):
     monkeypatch.setattr(core,'settings',lambda:('https://demo.supabase.co','pub','secret'))
     res=api.signed_download('notes/a/file.pdf')
     assert res['url']=='https://demo.supabase.co/storage/v1/object/sign/study-private/notes/a/file.pdf?token=x'
+
+
+def test_pib_listing_official_markup():
+    html = '''<html><ul class="num">
+    <li><a href="/PressReleseDetail.aspx?PRID=2331238" title="Important government announcement on new programme">Important government announcement on new programme</a><span class="publishdatesmall">Posted on: 01 Nov 2026</span></li>
+    <li><a href="/PressReleseDetail.aspx?PRID=2331239">Missing date must not import</a></li>
+    <li><a href="https://not-official.example/PressReleseDetail.aspx?PRID=2331240">Malicious external item</a><span class="publishdatesmall">Posted on: 01 Nov 2026</span></li>
+    </ul></html>'''
+    rows=core.parse_pib_listing(html)
+    assert len(rows)==1
+    assert rows[0]['published_date']=='2026-11-01'
+    assert rows[0]['url'].startswith('https://www.pib.gov.in/PressReleseDetail.aspx?PRID=2331238')
+
+def test_pib_listing_requires_official_date():
+    import pytest
+    with pytest.raises(ValueError):
+        core.parse_pib_listing('<ul><li><a href="/PressReleseDetail.aspx?PRID=1234">Some published release without date</a></li></ul>')
