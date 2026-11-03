@@ -176,3 +176,58 @@ def test_first_read_schedules_tomorrows_recall(monkeypatch):
     assert response.status_code==200
     assert writes[0][0]=='article_progress'
     assert writes[0][1][0]['revision_due']==(date.today()+timedelta(days=1)).isoformat()
+
+
+def test_gemini_json_response_and_mcq_validation():
+    import json
+    from api import gemini_client
+    example={'summary':'This verified source discusses a public policy change.',
+        'key_facts':['Fact from source'],'static_links':['Indian Economy'],
+        'why_relevant':'Relevant to the UPSC Economy syllabus.',
+        'uncertainties':[],
+        'mcqs':[{'question':'Which syllabus subject applies?',
+                 'options':['Economy','History','Environment','Art'],
+                 'answer_index':0,'explanation':'The source describes economic policy.'}]}
+    data={'candidates':[{'content':{'parts':[{'text':json.dumps(example)}]}}]}
+    assert gemini_client.parse_response(data)['mcqs'][0]['answer_index']==0
+    example['mcqs'][0]['answer_index']=9
+    data['candidates'][0]['content']['parts'][0]['text']=json.dumps(example)
+    assert gemini_client.parse_response(data)['mcqs']==[]
+
+def test_gemini_config_health(monkeypatch):
+    signed_in()
+    monkeypatch.setattr(core,'rest_rows',lambda *a,**kw:[])
+    monkeypatch.setenv('GEMINI_API_KEY','demo-value')
+    monkeypatch.delenv('OPENAI_API_KEY',raising=False)
+    response=client.get('/api/health')
+    assert response.status_code==200
+    assert response.json()['ai_enabled'] is True
+    assert response.json()['ai_provider']=='Gemini'
+
+def test_gemini_api_is_server_side(monkeypatch):
+    import json
+    from api import gemini_client
+    monkeypatch.setenv('GEMINI_API_KEY','dummy-secret')
+    monkeypatch.delenv('GEMINI_MODEL',raising=False)
+    seen={}
+    class Reply:
+        status_code=200
+        def json(self):
+            obj={'summary':'The official source describes an important policy change.',
+                 'key_facts':[],'static_links':[],'why_relevant':'Relevant',
+                 'uncertainties':[],'mcqs':[]}
+            return {'candidates':[{'content':{'parts':[{'text':json.dumps(obj)}]}}]}
+    class Client:
+        def __init__(self,*args,**kwargs):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):return False
+        def post(self,url,headers,json):
+            seen.update(url=url,headers=headers,body=json)
+            return Reply()
+    monkeypatch.setattr(gemini_client.httpx,'Client',Client)
+    result=gemini_client.generate('https://pib.gov.in/example','2026-11-03',
+                                  'Policy update','The official statement describes a policy.')
+    assert result['provider']=='Gemini'
+    assert seen['headers']['x-goog-api-key']=='dummy-secret'
+    assert 'dummy-secret' not in seen['url']
+    assert seen['body']['generationConfig']['responseMimeType']=='application/json'
