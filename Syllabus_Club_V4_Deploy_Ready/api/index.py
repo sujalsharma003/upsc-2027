@@ -325,6 +325,7 @@ def run_ingestion(manual:bool):
         c.rest_write('ingestion_runs',[{'id':str(uuid.uuid4()),'started_at':result['ran_at'],
             'finished_at':c.utcnow(),'items_added':result['added'],'errors':result['errors']}])
         return result
+    except RuntimeError as e: raise hidden(e)
 
 @app.get('/')
 def api_root():
