@@ -179,11 +179,11 @@ function caBulkPaint(){
 async function caBulkGenerate(){
  if(caUI.bulk?.running||caUI.busyId!==null||caUI.loading)return;
  if(!caUI.ai||!caUI.online){caUI.error='Sign in and configure Gemini before generating notes.';caStableRender();return}
- let pending=[],remaining=0,dailyLimit=10;
+ let pending=[],generatedToday=0;
  try{
    const quota=await caRequest('/api/ai/usage');
-   dailyLimit=Number(quota.limit)||10;
-   remaining=Number(quota.remaining)||0;
+   if(!quota.enabled)throw Error('Gemini is not configured.');
+   generatedToday=Number(quota.used)||0;
    for(let offset=0;offset<=9900;offset+=300){
      const listing=await caRequest('/api/articles?limit=300&offset='+offset);
      const batch=listing.items||[];
@@ -192,10 +192,9 @@ async function caBulkGenerate(){
    }
  }catch(e){caUI.error='Unable to prepare batch: '+e.message;caStableRender();return}
  if(!pending.length){caUI.error='All currently loaded news already have Gemini notes.';caStableRender();return}
- if(remaining<=0){caUI.error='Daily Gemini limit reached ('+dailyLimit+' generations). Try again tomorrow.';caStableRender();return}
- const amount=Math.min(pending.length,remaining);
- if(!confirm('Generate Gemini notes for '+amount+' news items now?\n'+pending.length+' do not have notes; today you have '+remaining+' of '+dailyLimit+' generations remaining.\nEach generation may use Gemini API quota or incur charges. Notes will be saved to Supabase.\n\nThis batch runs in this browser, so keep the tab open.'))return;
- const queue=pending.slice(0,amount);
+ const amount=pending.length;
+ if(!confirm('Generate Gemini notes for '+amount+' news items now?\nGenerated today: '+generatedToday+'. Syllabus Club has no artificial daily limit. Gemini enforces its own project quotas.\nAPI usage may incur charges if billing is enabled. Notes will be saved to Supabase.\n\nThe batch runs in this browser. Keep the tab open; it stops when you request it or Gemini reports a quota limit.'))return;
+ const queue=pending;
  const b={running:true,stop:false,total:queue.length,done:0,success:0,failed:0,current:'Preparing first article…'};
  caUI.bulk=b;caUI.error='';
  caStableRender();
@@ -213,7 +212,7 @@ async function caBulkGenerate(){
    }catch(e){
      b.failed++;consecutiveErrors++;
      const msg=String(e?.message||'Unknown error');
-     if(/429|quota|rate limit|daily.*limit/i.test(msg)){b.stop=true;b.current='Stopped: daily quota or rate limit reached.'}
+     if(/429|quota|rate limit|resource.exhausted/i.test(msg)){b.stop=true;b.current='Stopped: Gemini API quota or rate limit reached. Resume when the provider allows more requests.'}
      else if(consecutiveErrors>=3){b.stop=true;b.current='Stopped after 3 consecutive errors. Check your Gemini configuration.'}
      else b.current='Skipped: '+row.title+' — '+msg.slice(0,120);
    }finally{

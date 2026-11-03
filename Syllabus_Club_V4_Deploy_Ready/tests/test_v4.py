@@ -272,15 +272,16 @@ def test_source_host_and_release_id_are_verified():
              'title':'Government announcement'}, lambda url:'unreachable')
 
 
-def test_bulk_gemini_quota_endpoint_is_authenticated_and_bounded(monkeypatch):
+def test_bulk_gemini_quota_endpoint_is_provider_limited_and_authenticated(monkeypatch):
     signed_in()
     monkeypatch.setenv('GEMINI_API_KEY','set-for-test')
-    monkeypatch.setenv('DAILY_AI_LIMIT','10')
-    monkeypatch.setattr(core,'rest_rows',lambda table,params,limit: [{'id':'used'}]*3
+    monkeypatch.setenv('DAILY_AI_LIMIT','10')  # legacy setting must not impose a cap
+    monkeypatch.setattr(core,'rest_rows',lambda table,params,limit: [{'id':'used'}]*18
         if table=='ai_usage' else [])
     response=client.get('/api/ai/usage')
     assert response.status_code==200
-    assert response.json()=={'used':3,'limit':10,'remaining':7,'enabled':True}
+    assert response.json()=={'used':18,'limit':None,'remaining':None,
+                             'quota_source':'Gemini API','enabled':True}
     app.dependency_overrides.clear()
     assert client.get('/api/ai/usage').status_code==401
 
@@ -295,4 +296,27 @@ def test_current_affairs_batch_renders_progress_without_changing_card_order():
     assert 'caBulkPaint()' in script
     assert "caUI.busyId=null;if(page==='current')caStableRender(id)" in script
     assert 'await caLoad({renderAfter:false})' in script
-    assert 'Daily Gemini limit reached' in script
+    assert 'Syllabus Club has no artificial daily limit' in script
+    assert 'Gemini API quota or rate limit reached' in script
+
+def test_gemini_generation_not_blocked_by_legacy_cap(monkeypatch):
+    signed_in()
+    monkeypatch.setenv('GEMINI_API_KEY','test-only')
+    monkeypatch.setenv('DAILY_AI_LIMIT','10')
+    article_id='77777777-7777-4777-8777-777777777777'
+    article={'id':article_id,'owner_id':None,'source':'PDF',
+             'source_text':'Official public policy documentation contains verified facts and context. '*4,
+             'title':'Official policy document','published_date':'2026-11-03',
+             'date_precision':'day','tags':['Polity'],'relevance':60}
+    monkeypatch.setattr(api,'article_or_404',lambda aid,uid:article)
+    monkeypatch.setattr(core,'rest_rows',lambda table,params=None,limit=100: [{'id':str(i)} for i in range(18)]
+                        if table=='ai_usage' else [])
+    monkeypatch.setattr(core,'rest_update',lambda *args,**kwargs: [])
+    monkeypatch.setattr(core,'rest_write',lambda *args,**kwargs: [])
+    monkeypatch.setattr(api.gemini_client,'generate',
+        lambda *args,**kwargs:{'summary':'A verified public policy summary.',
+            'key_facts':[], 'static_links':[],'why_relevant':'Polity','uncertainties':[],
+            'mcqs':[], 'provider':'Gemini','model':'test'})
+    response=client.post('/api/articles/'+article_id+'/analyze')
+    assert response.status_code==200
+    assert response.json()['analysis']['provider']=='Gemini'

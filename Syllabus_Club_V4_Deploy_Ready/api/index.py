@@ -65,13 +65,14 @@ def health(user=Depends(get_user)):
     except RuntimeError as e:raise hidden(e)
 
 def ai_quota_for_user(user_id:str):
+    # Usage is informational only. Syllabus Club does not impose a daily cap.
+    # The Gemini API enforces the project's model-specific quotas itself.
     today=datetime.now(timezone.utc).date().isoformat()+'T00:00:00+00:00'
-    limit=max(1,min(50,int(os.getenv('DAILY_AI_LIMIT','10'))))
     usage=c.rest_rows('ai_usage',{
         'user_id':f'eq.{user_id}','created_at':'gte.'+today,
-        'select':'id'},100)
-    used=len(usage)
-    return {'used':used,'limit':limit,'remaining':max(0,limit-used)}
+        'select':'id'},10000)
+    return {'used':len(usage),'limit':None,'remaining':None,
+            'quota_source':'Gemini API'}
 
 
 @app.get('/api/ai/usage')
@@ -280,9 +281,7 @@ def analyze(article_id:str,user=Depends(get_user)):
     if not os.getenv('GEMINI_API_KEY'):
         raise HTTPException(503,'Add GEMINI_API_KEY in Vercel environment settings to enable AI notes')
     try:
-        # Cost guard: cap requests per owner/day, even if a token is compromised.
-        if ai_quota_for_user(user['id'])['remaining']<1:
-            raise HTTPException(429,'Daily Gemini generation limit reached. Continue tomorrow.')
+        # User-triggered generation: Gemini enforces model/project quotas.
         row=article_or_404(article_id,user['id'])
         text=(row.get('source_text') or '')
         # Imported PIB/PRS rows may contain placeholder text. Always get
