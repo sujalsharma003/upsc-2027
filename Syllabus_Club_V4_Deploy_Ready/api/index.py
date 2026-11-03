@@ -375,3 +375,47 @@ def _source_html_probe_v6():
         except Exception as exc:
             out[key]={'error':type(exc).__name__+': '+str(exc)[:130]}
     return out
+
+
+@app.get('/api/_candidate_source_probe_v6')
+def _candidate_source_probe_v6():
+    from bs4 import BeautifulSoup
+    urls={
+      'pib_iframe':'https://www.pib.gov.in/PressReleaseIframePage.aspx?PRID=2332011',
+      'pib_english_iframe':'https://pib.gov.in/PressReleaseIframePage.aspx?PRID=2332011',
+      'pib_detail_lang':'https://www.pib.gov.in/PressReleseDetail.aspx?PRID=2332011&lang=1&reg=1',
+      'pib_old_page':'https://www.pib.gov.in/PressReleasePage.aspx?PRID=2332011',
+      'prs_review':'https://prsindia.org/policy/monthly-policy-review/october-2026'
+    }
+    out={}
+    for key,url in urls.items():
+        try:
+            html=c.safe_fetch(url)
+            s=BeautifulSoup(html,'html.parser')
+            candidates={}
+            for sel in ('#content','#ContentPlaceHolder1_lblContent','.content','.content-area',
+                         '.main-container','.main','main','.release-content','#dvContent',
+                         '.release-details','#divContent','.wrapper','p','span'):
+                arr=s.select(sel)
+                if not arr:continue
+                arr=sorted(arr,key=lambda x:len(x.get_text(' ',strip=True)),reverse=True)
+                candidates[sel]={'n':len(arr),'top':[{'len':len(a.get_text(' ',strip=True)),
+                    'start':a.get_text(' ',strip=True)[:140]} for a in arr[:3]]}
+            focused=[]
+            for v in s.find_all(string=True):
+                if '21,800' in str(v) or 'metro projects' in str(v).lower() or ('repo rate increased' in str(v).lower()):
+                    node=v.parent
+                    group=[]
+                    for _ in range(5):
+                        if not node:break
+                        tx=node.get_text(' ',strip=True)
+                        group.append({'tag':node.name,'class':node.get('class'),
+                           'len':len(tx),'start':tx[:340], 'end':tx[-130:]})
+                        node=node.parent
+                    focused.append(group)
+                    if len(focused)>=3:break
+            out[key]={'html_len':len(html),'title':s.title.get_text(' ',strip=True)[:90] if s.title else '',
+                'body_chars':len(s.get_text(' ',strip=True)),'selectors':candidates,'focus':focused}
+        except Exception as exc:
+            out[key]={'error':type(exc).__name__+': '+str(exc)[:140]}
+    return out
