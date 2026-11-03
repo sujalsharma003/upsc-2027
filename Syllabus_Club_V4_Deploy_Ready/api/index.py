@@ -396,5 +396,20 @@ def diagnose_official_sources():
         info['prs_heading_samples']=[{'tag':h.name,'text':h.get_text(' ',strip=True)[:180],'parent_excerpt':h.parent.get_text(' ',strip=True)[:250]} for h in soup.select('h1,h2,h3,h4')[:20]]
         info['prs_body_text_length']=len(soup.get_text(' ',strip=True))
     except Exception as e:info['prs_heading_samples']={'error':str(e)[:150]}
+    try:
+        imported=c.parse_pib_listing(c.safe_fetch(c.PIB_ALL))
+        info['pib_parser_verification']={
+          'parsed_count':len(imported),
+          'first_dates':[x['published_date'] for x in imported[:5]],
+          'first_titles':[x['title'][:100] for x in imported[:3]]
+        }
+    except Exception as e:
+        info['pib_parser_verification']={'error':type(e).__name__+': '+str(e)[:200]}
+    try:
+        parsed_prs=c.parse_prs(c.safe_fetch(c.PRS))
+        info['prs_parser_verification']={'parsed_count':len(parsed_prs),
+          'titles':[x['title'] for x in parsed_prs[:5]]}
+    except Exception as e:
+        info['prs_parser_verification']={'error':type(e).__name__+': '+str(e)[:200]}
     return info
 
