@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "crons": [
+    {"path": "/api/cron/ingest", "schedule": "15 2 * * *"}
+  ],
+  "headers": [
+    {"source": "/index.html", "headers": [{"key": "Cache-Control", "value": "no-store"}]},
+    {"source": "/cloud-bridge.js", "headers": [{"key": "Cache-Control", "value": "no-store"}]},
+    {"source": "/api/(.*)", "headers": [{"key": "Cache-Control", "value": "no-store"}]}
+  ]
+}
