@@ -312,6 +312,8 @@ def parse_prs_highlights(html, monthly_url, issue_month):
         strong=element.find('strong')
         if strong is None:continue
         label=re.sub(r'\s+',' ',strong.get_text(' ',strip=True)).strip()
+        if '">' in label:
+            label=label.rsplit('">',1)[-1].strip()
         if not (20<=len(label)<=280 and re.search(r'\(p\.\s*\d+\)',label,re.I)):
             continue
         title=re.sub(r'\s*\(p\.\s*\d+\)\s*$','',label,flags=re.I).strip()
