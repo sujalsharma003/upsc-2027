@@ -335,6 +335,195 @@ function gradeRecall(tid,quality){
  save();render();
  toast(weak?'Added to weak topics · revisit tomorrow':'Recall saved · next review '+niceDate(p.revisionDue));
 }
+
+/* PRACTICE STUDIO: answer only questions attached to saved Gemini notes.
+   Every untested syllabus topic remains available for honest active recall. */
+let practiceBusy=false, practiceError='',practiceRecallId=null;
+const SUBJECT_FOR_TAG={
+ 'Polity':'polity','Economy':'economy','Environment':'environment',
+ 'Geography':'geography','Science & Tech':'science',
+ 'History & Culture':'history','International Relations':'current',
+ 'Social Issues':'economy'
+};
+function practiceSubject(article){return SUBJECT_FOR_TAG[(article.tags||[])[0]]||'current'}
+function practiceTokens(text){
+ const stop=new Set(['the','and','for','with','from','india','indian','about','which','what','does','into','this','that','have','been','under','are','was','how','would','some']);
+ return new Set((String(text||'').toLowerCase().match(/[a-z]{4,}/g)||[]).filter(w=>!stop.has(w)));
+}
+function practiceMatchingTopic(article,question,subject){
+ const words=practiceTokens(article.title+' '+question);
+ let candidate=null,best=0;
+ for(const t of SEED.topics){
+   if(t.subject!==subject)continue;
+   const terms=practiceTokens(t.title),shared=[...terms].filter(w=>words.has(w)).length;
+   if(shared>=2&&shared>best){best=shared;candidate=t.id}
+ }
+ return candidate;
+}
+function practiceQuestionsFor(articles){
+ const questions=[];
+ for(const a of articles){
+   const analysis=a.analysis;if(!analysis||!Array.isArray(analysis.mcqs))continue;
+   const subject=practiceSubject(a);
+   analysis.mcqs.slice(0,12).forEach((q,i)=>{
+     if(!q||typeof q.question!=='string'||!Array.isArray(q.options)||q.options.length!==4||
+         !q.options.every(x=>typeof x==='string'&&x.trim())||
+         !Number.isInteger(q.answer_index)||q.answer_index<0||q.answer_index>3||
+         typeof q.explanation!=='string'||!q.explanation.trim())return;
+     questions.push({id:a.id+':'+i,articleId:a.id,question:q.question.slice(0,750),
+        options:q.options.map(x=>x.slice(0,400)),answer_index:q.answer_index,
+        explanation:q.explanation.slice(0,1200),sourceTitle:a.title,
+        sourceUrl:caSafeLink(a)||'',subject,topicId:practiceMatchingTopic(a,q.question,subject)});
+   });
+ }
+ const today=todayISO();
+ const fingerprint=v=>{let n=0;for(const c of today+v)n=((n<<5)-n+c.charCodeAt(0))|0;return n>>>0};
+ questions.sort((a,b)=>{
+   const aMiss=state.mistakeLog.some(x=>x.id===a.id&&!x.resolved);
+   const bMiss=state.mistakeLog.some(x=>x.id===b.id&&!x.resolved);
+   const aw=(aMiss?500:0)+(Number(state.subjectWeakness[a.subject])||0)*30;
+   const bw=(bMiss?500:0)+(Number(state.subjectWeakness[b.subject])||0)*30;
+   return bw-aw||fingerprint(a.id)-fingerprint(b.id);
+ });
+ // Limit each source article to 3 questions; the stored source remains inspectable.
+ return questions;
+}
+async function startDailyPractice(){
+ if(practiceBusy)return;
+ if(state.activePractice&&state.activePractice.pos<state.activePractice.questions.length){
+   if(!confirm('Discard your unfinished quiz and create a new one?'))return;
+ }
+ practiceBusy=true;practiceError='';render();
+ try{
+   if(!window.SYLLABUS_CLOUD?.loggedIn)throw Error('Sign in to Cloud to load saved Gemini MCQs.');
+   const articles=[];
+   for(let offset=0;offset<3000;offset+=300){
+     const result=await caRequest('/api/articles?limit=300&offset='+offset);
+     const batch=result.items||[];articles.push(...batch);
+     if(batch.length<300)break;
+   }
+   const questions=practiceQuestionsFor(articles).slice(0,20);
+   if(!questions.length)throw Error('No verified saved Gemini MCQs yet. Generate notes for PIB/PRS articles, then return here. Topic recall is available now.');
+   state.activePractice={id:rid(),date:todayISO(),startedAt:new Date().toISOString(),
+     questions,answers:[],pos:0};
+   save();toast('Daily quiz ready · '+questions.length+' source-linked MCQs');
+ }catch(e){practiceError=e.message;toast(e.message)}
+ finally{practiceBusy=false;render()}
+}
+function practiceNoteWeak(q,chosen){
+ const now=new Date().toISOString(),wrong=chosen!==q.answer_index;
+ const existing=state.mistakeLog.find(x=>x.id===q.id);
+ if(wrong){
+   if(existing){existing.count=(existing.count||1)+1;existing.lastMissed=now;existing.resolved=false;
+      existing.chosen=chosen;}
+   else state.mistakeLog.unshift({id:q.id,question:q.question,options:q.options,
+      answer_index:q.answer_index,explanation:q.explanation,sourceTitle:q.sourceTitle,
+      sourceUrl:q.sourceUrl,subject:q.subject,topicId:q.topicId||null,
+      lastMissed:now,chosen,count:1,resolved:false});
+   state.subjectWeakness[q.subject]=Math.min(40,(Number(state.subjectWeakness[q.subject])||0)+1);
+   if(q.topicId){
+     state.topicWeakness[q.topicId]=Math.min(30,revisionWeakScore(q.topicId)+2);
+     const p=state.topics[q.topicId];if(p){p.ready=false;p.revisionStage=0;p.revisionDue=addDays(todayISO(),1)}
+   }
+ }else{
+   if(existing)existing.resolved=true;
+   state.subjectWeakness[q.subject]=Math.max(0,(Number(state.subjectWeakness[q.subject])||0)-1);
+   if(q.topicId)state.topicWeakness[q.topicId]=Math.max(0,revisionWeakScore(q.topicId)-1);
+ }
+ state.mistakeLog=state.mistakeLog.slice(0,250);
+}
+function practiceAnswer(idx){
+ const a=state.activePractice;if(!a||a.answers[a.pos]!==undefined)return;
+ const q=a.questions[a.pos];if(!q||!Number.isInteger(idx)||idx<0||idx>3)return;
+ a.answers[a.pos]=idx;
+ practiceNoteWeak(q,idx);
+ save();render();
+}
+function practiceNext(){
+ const a=state.activePractice;if(!a||a.answers[a.pos]===undefined)return;
+ if(a.pos<a.questions.length-1){a.pos++;save();render();return}
+ const correct=a.questions.reduce((n,q,i)=>n+(a.answers[i]===q.answer_index?1:0),0);
+ const wrong=a.questions.length-correct;
+ const duration=Math.max(0,Math.round((Date.now()-Date.parse(a.startedAt))/60000));
+ state.practiceHistory.unshift({id:a.id,date:a.date,correct,wrong,total:a.questions.length,
+   score:Number((2*correct-2*wrong/3).toFixed(2)),minutes:duration,
+   finishedAt:new Date().toISOString()});
+ state.practiceHistory=state.practiceHistory.slice(0,100);
+ state.activePractice=null;save();render();
+ toast('Quiz saved · '+correct+'/'+(correct+wrong)+' correct');
+}
+function practiceRecallSelect(id){if(!state.topics[id])return;practiceRecallId=id;render()}
+function practiceLinkMistake(mid,tid){
+ const item=state.mistakeLog.find(m=>m.id===mid);
+ if(!item)return;
+ const previous=item.topicId;
+ if(previous===tid)return;
+ item.topicId=tid||null;
+ if(tid&&state.topics[tid]){
+   state.topicWeakness[tid]=Math.min(30,revisionWeakScore(tid)+2);
+   const p=state.topics[tid];p.ready=false;p.revisionDue=addDays(todayISO(),1);p.revisionStage=0;
+ }
+ save();render();toast('Mistake linked to your topic revision calendar');
+}
+function renderPractice(){
+ const session=state.activePractice,history=state.practiceHistory||[],mistakes=state.mistakeLog||[];
+ const unresolved=mistakes.filter(m=>!m.resolved),latest=history[0];
+ const weakness=SEED.subjects.map(s=>({subject:s,score:Number(state.subjectWeakness[s.id])||0}))
+  .filter(x=>x.score>0).sort((a,b)=>b.score-a.score);
+ const weakTopics=SEED.topics.filter(t=>revisionWeakScore(t.id)>0)
+  .sort((a,b)=>revisionWeakScore(b.id)-revisionWeakScore(a.id)).slice(0,12);
+ let html=heading('Prelims Practice Studio',
+  'Daily source-grounded MCQs, honest active recall for every syllabus topic and a mistake notebook that guides revision.',
+  'DAILY QUIZ / WEAK AREAS');
+ html+='<div class="cards">'+
+  statCard('Completed quizzes',history.length,'Saved to your study state','◫')+
+  statCard('Unresolved mistakes',unresolved.length,'Revisit and retest','!')+
+  statCard('Weak syllabus topics',weakTopics.length,'Linked to revisions','↻')+
+  statCard('Recent accuracy',latest?Math.round(latest.correct/(latest.total||1)*100)+'%':'—','From your latest daily quiz','◎')+'</div>';
+ if(practiceError)html+='<div class="ca-message">'+h(practiceError)+'</div>';
+ html+='<section class="practice-card"><div class="section-heading"><div><h2>Smart daily quiz</h2><p>Up to 20 MCQs from existing Gemini notes. Generates no new AI calls.</p></div>'+
+  '<button class="primary-btn" data-practice-start '+(practiceBusy?'disabled':'')+'>'+
+  (practiceBusy?'Loading saved questions…':session?'↻ New daily quiz':'▶ Start daily quiz')+'</button></div>';
+ if(session){
+   const q=session.questions[session.pos],answered=session.answers[session.pos],done=answered!==undefined;
+   html+='<div class="practice-quiz-meta"><span>QUESTION '+(session.pos+1)+' / '+session.questions.length+'</span><span>'+h(SEED.subjects.find(s=>s.id===q.subject)?.short||q.subject)+'</span></div>'+
+     '<div class="practice-meter"><i style="width:'+Math.round((session.pos+(done?1:0))/session.questions.length*100)+'%"></i></div>'+
+     '<h3 class="practice-question">'+h(q.question)+'</h3>'+
+     '<div class="practice-options">'+q.options.map((o,i)=>'<button class="practice-option '+(done?(i===q.answer_index?'correct':i===answered?'incorrect':''):'')+
+       '" data-practice-answer="'+i+'" '+(done?'disabled':'')+'><strong>'+String.fromCharCode(65+i)+'</strong><span>'+h(o)+'</span></button>').join('')+'</div>'+
+     (done?'<div class="practice-explanation"><strong>'+(answered===q.answer_index?'✓ Correct answer':'✕ Needs revision · Answer '+String.fromCharCode(65+q.answer_index))+'</strong><p>'+h(q.explanation)+'</p></div>':'')+
+     '<p class="practice-source">Source: '+(q.sourceUrl?'<a target="_blank" rel="noopener noreferrer" href="'+h(q.sourceUrl)+'">'+h(q.sourceTitle)+'</a>':h(q.sourceTitle))+
+     ' · '+(q.topicId?'Suggested topic: '+h(SEED.topics.find(t=>t.id===q.topicId)?.title||''):'Topic association not certain; choose it in Mistake Notebook if needed.')+'</p>'+
+     (done?'<button class="primary-btn" data-practice-next>'+(session.pos===session.questions.length-1?'Finish & save score':'Next question →')+'</button>':'');
+ }else html+='<p class="small text-muted">Only saved source-linked questions are used. If none are available, generate Gemini notes in Current Affairs. You can still practise every syllabus topic using Active Recall below.</p>';
+ html+='</section>';
+ html+='<section class="practice-card"><div class="section-heading"><div><h2>Active recall · all '+SEED.topics.length+' topics</h2><p>Try remembering three facts without opening notes. Grade yourself after checking your study material.</p></div><button class="outline-btn" data-nav="revision">Open full calendar ↗</button></div>';
+ const focus=practiceRecallId&&state.topics[practiceRecallId]?SEED.topics.find(t=>t.id===practiceRecallId):
+  dueTopics().sort((a,b)=>revisionWeakScore(b.id)-revisionWeakScore(a.id))[0]||SEED.topics[0];
+ html+='<div class="practice-recall-focus"><span class="small-tag">'+h(SEED.subjects.find(s=>s.id===focus.subject)?.short||focus.subject)+'</span><h3>'+h(focus.title)+'</h3>'+
+  '<p>Recall its definition, essential concepts and exam-relevant examples. Verify them in your textbook or official notes before choosing your confidence level.</p>'+
+  '<div class="ca-actions"><button class="outline-btn" data-recall-hard="'+h(focus.id)+'">Struggled · review tomorrow</button><button class="primary-btn" data-recall-good="'+h(focus.id)+'">Remembered · schedule next</button></div></div>';
+ html+='<div class="practice-recall-topics">'+[...new Map([...weakTopics,...dueTopics(),...SEED.topics].map(t=>[t.id,t])).values()].slice(0,10).map(t=>
+  '<button class="practice-recall-pick" data-practice-recall="'+h(t.id)+'">'+h(t.title)+(revisionWeakScore(t.id)?' · Weak':'')+'</button>').join('')+'</div></section>';
+ html+='<section class="practice-card"><div class="section-heading"><div><h2>Your weak areas</h2><p>Derived from wrong answers and self-rated recall, not assumptions.</p></div></div>'+
+  (weakness.length?'<div class="practice-weak-subjects">'+weakness.map(x=>'<span class="ca-linktag">'+h(x.subject.short)+' · '+x.score+' errors</span>').join('')+'</div>':'<p class="small text-muted">No weaknesses recorded yet. A quiz or recall session will start your evidence-based tracker.</p>')+
+  (weakTopics.length?'<div class="practice-weak-grid">'+weakTopics.map(t=>'<button class="practice-recall-pick" data-practice-recall="'+h(t.id)+'">'+h(t.title)+' · '+revisionWeakScore(t.id)+'</button>').join('')+'</div>':'')+
+  '</section>';
+ html+='<section class="practice-card"><div class="section-heading"><div><h2>Mistake notebook</h2><p>Wrong MCQs remain here until you answer correctly on a future quiz. Assign a syllabus topic when a match is unclear.</p></div></div>';
+ if(!mistakes.length)html+='<p class="small text-muted">No mistakes logged. Incorrect answers will appear automatically.</p>';
+ for(const m of mistakes.slice(0,24)){
+   const opts=SEED.topics.filter(t=>t.subject===m.subject);
+   html+='<div class="practice-mistake"><div class="practice-quiz-meta"><span>'+h(m.sourceTitle||'Saved question')+'</span><span>'+(m.resolved?'✓ Resolved':'Review needed')+' · '+(m.count||1)+' miss(es)</span></div>'+
+    '<strong>'+h(m.question)+'</strong><p>Correct: '+h(m.options[m.answer_index]||'')+'</p><p class="small text-muted">'+h(m.explanation||'')+'</p>'+
+    '<label class="practice-link-label">Link to syllabus topic <select class="select" data-practice-mistake-id="'+h(m.id)+'"><option value="">Unassigned / subject-level</option>'+
+    opts.map(t=>'<option value="'+h(t.id)+'" '+(m.topicId===t.id?'selected':'')+'>'+h(t.title)+'</option>').join('')+'</select></label></div>';
+ }
+ html+='</section>';
+ if(history.length)html+='<section class="practice-card"><h2>Quiz history</h2>'+history.slice(0,10).map(x=>
+  '<div class="mini-item"><strong>'+h(niceDate(x.date))+'</strong><span>'+x.correct+'/'+x.total+' correct · Score '+x.score+' · '+x.minutes+' min</span></div>').join('')+'</section>';
+ return html;
+}
+
 function renderRevision(){
  const due=dueTopics(),today=todayISO(),subjectOptions=[['all','All subjects'],...SEED.subjects.map(s=>[s.id,s.short])];
  const all=SEED.topics.filter(t=>{
@@ -398,8 +587,8 @@ function renderSettings(){const s=stats();return heading('Preferences & data saf
  `<div class="grid-half"><div class="card"><strong class="card-title">Your preparation profile</strong><div class="mini-list"><div class="mini-item"><span>Target exam date</span><strong>1 May 2027 (assumed)</strong></div><div class="mini-item"><span>Plan start</span><strong>3 Nov 2026</strong></div><div class="mini-item"><span>End of plan</span><strong>30 Apr 2027</strong></div><div class="mini-item"><span>Study allocation</span><strong>6 hours/day</strong></div><div class="mini-item"><span>CSAT</span><strong>Completed — revision needed</strong></div><div class="mini-item"><span>Topic coverage</span><strong>${s.coverage}%</strong></div></div></div><div class="card"><strong class="card-title">Backup and restore</strong><p class="small text-muted">Back up your topics, task checks, notes, document links, file metadata, reminders, mock scores and recorded study sessions.</p><div class="page-action"><button class="primary-btn" data-export>↓ Export JSON backup</button><button class="outline-btn" data-import-open>↑ Import backup</button><input type="file" accept="application/json,.json" hidden id="import-input"></div><div class="divider"></div><strong class="card-title">Reset demo data</strong><p class="small text-muted">Restores the 187 initial topic statuses and clears user-created content. Locally uploaded document blobs are cleared too.</p><button class="outline-btn danger-btn" data-reset>Reset to initial assessment</button></div></div>
  <div class="section-heading"><h2>Scope of this first version</h2></div><div class="card"><div class="mini-list"><div class="mini-item"><span>✓ 187 seeded syllabus topics</span><span class="small-tag">Working</span></div><div class="mini-item"><span>✓ Daily 6h targets across 179 days</span><span class="small-tag">Working</span></div><div class="mini-item"><span>✓ Weekly reading checklists and exports</span><span class="small-tag">Working</span></div><div class="mini-item"><span>✓ Notes, local documents, revisions, reminders, tests and time tracking</span><span class="small-tag">Working</span></div><div class="mini-item"><span>Cloud account / multi-device sync</span><span class="small-tag">Production phase</span></div><div class="mini-item"><span>Server-backed notifications and adaptive task rebalancing</span><span class="small-tag">Production phase</span></div></div></div>`;
 }
-const nav=[['overview','◈','Home'],['current','✳','Current Affairs'],['timer','◷','Focus timer'],['today','◉','Today'],['weekly','▦','26-week plan'],['syllabus','◫','Syllabus'],['revision','↻','Revision'],['notes','✎','Notes'],['documents','▤','Documents'],['tests','▥','Tests & PYQs'],['reminders','♧','Reminders'],['settings','⚙','Settings']];
-function render(){if(zenMode){$('#app').innerHTML=renderZen();return;}const days=Math.max(0,dayDiff(todayISO(),SEED.examDate));const pages={overview:renderOverview,current:renderCurrentAffairs,timer:renderTimer,today:renderToday,weekly:renderWeekly,syllabus:renderSyllabus,revision:renderRevision,notes:renderNotes,documents:renderDocuments,tests:renderTests,reminders:renderReminders,settings:renderSettings};
+const nav=[['overview','◈','Home'],['current','✳','Current Affairs'],['timer','◷','Focus timer'],['today','◉','Today'],['weekly','▦','26-week plan'],['syllabus','◫','Syllabus'],['revision','↻','Revision'],['practice','◉','Practice Studio'],['notes','✎','Notes'],['documents','▤','Documents'],['tests','▥','Tests & PYQs'],['reminders','♧','Reminders'],['settings','⚙','Settings']];
+function render(){if(zenMode){$('#app').innerHTML=renderZen();return;}const days=Math.max(0,dayDiff(todayISO(),SEED.examDate));const pages={overview:renderOverview,current:renderCurrentAffairs,timer:renderTimer,today:renderToday,weekly:renderWeekly,syllabus:renderSyllabus,revision:renderRevision,practice:renderPractice,notes:renderNotes,documents:renderDocuments,tests:renderTests,reminders:renderReminders,settings:renderSettings};
  $('#app').innerHTML=`<div class="app-shell ${zenMode?'zen-mode':''}"><aside class="sidebar"><div class="logo"><div class="logo-mark">✳</div><div><div class="logo-name">Syllabus Club<span class="logo-period">.</span></div><div class="logo-desc">UPSC · CLASS OF 2027</div></div></div><div class="nav-label">YOUR SPACE</div><nav class="nav" aria-label="Main navigation">${nav.map(([id,icon,label])=>`<button data-nav="${id}" class="${page===id?'active':''}"><span class="nav-icon">${icon}</span>${label}</button>`).join('')}</nav><div class="side-bottom"><div class="sidebar-capsule"><span class="capsule-spark">✦</span><strong>${days} days to go</strong><p>Build the habit. Chase the rank.</p><div class="capsule-progress"><i style="width:${stats().coverage}%"></i></div><span>${stats().coverage}% covered · 6h/day</span></div><div class="side-small">LOCAL WORKSPACE · VERSION 3.0</div></div></aside><div class="main"><header class="topbar"><div><strong>Make today your advantage <span class="topbar-star">✳</span></strong><div class="topbar-sub">${niceDate(todayISO(),{weekday:'long',day:'numeric',month:'long',year:'numeric'})} · Your personal study studio</div></div><div class="top-actions"><button class="top-focus" data-nav="timer">◷ <span data-header-time>${shortDuration(dailyStudied(todayISO()))}</span> / 6h</button><button class="round-action" data-nav="reminders" title="Reminders">♧ ${urgentReminders().length||''}</button><button class="round-action" data-nav="settings" title="Backup and settings">⚙</button></div></header><main class="content">${pages[page]() }<p class="footnote">Local prototype: user data lives in this browser; no account, backend sync or closed-tab notifications yet. Dates target an assumed 1 May 2027 exam, not an official announcement. PYQ weightage is historical and approximate.</p></main></div></div>${modal?renderModal():''}`;
 }
 function subjectOptions(selected=''){return `<option value="">General / unassigned</option>${SEED.subjects.map(s=>`<option value="${s.id}" ${selected===s.id?'selected':''}>${h(s.name)}</option>`).join('')}<option value="csat" ${selected==='csat'?'selected':''}>CSAT</option>`}
@@ -460,6 +649,10 @@ async function handleClick(e){const el=e.target.closest('button');if(!el)return;
  if(el.dataset.shift){day=clampPlan(addDays(day,Number(el.dataset.shift)));weekIndex=Math.floor(dayDiff(SEED.startDate,day)/7);render();return}
  if(el.dataset.week!==undefined){weekIndex=Number(el.dataset.week);render();window.scrollTo(0,0);return}
  if(el.dataset.brief!==undefined){const i=Number(el.dataset.brief);download(weeklyBrief(i),`UPSC-2027-week-${String(i+1).padStart(2,'0')}-brief.md`,'text/markdown');return}
+ if(el.dataset.practiceStart!==undefined){await startDailyPractice();return}
+ if(el.dataset.practiceAnswer!==undefined){practiceAnswer(Number(el.dataset.practiceAnswer));return}
+ if(el.dataset.practiceNext!==undefined){practiceNext();return}
+ if(el.dataset.practiceRecall){practiceRecallSelect(el.dataset.practiceRecall);return}
  if(el.dataset.recallGood){gradeRecall(el.dataset.recallGood,'good');return}
  if(el.dataset.recallHard){gradeRecall(el.dataset.recallHard,'hard');return}
  if(el.dataset.revisionMore!==undefined){revisionPageSize+=60;render();return}
@@ -489,6 +682,7 @@ function handleChange(e){const t=e.target;
  if(t.dataset.priority){state.topics[t.dataset.priority].priority=t.value;save();render();return}
  if(t.id==='subject-filter'){subjectFilter=t.value;render();return}
  if(t.id==='status-filter'){statusFilter=t.value;render();return}
+ if(t.dataset.practiceMistakeId!==undefined){practiceLinkMistake(t.dataset.practiceMistakeId,t.value);return}
  if(t.id==='revision-filter'){revisionFilter=t.value;revisionPageSize=40;render();return}
  if(t.id==='revision-subject'){subjectFilter=t.value;revisionPageSize=40;render();return}
  if(t.id==='day-picker'){day=clampPlan(t.value);weekIndex=Math.floor(dayDiff(SEED.startDate,day)/7);render();return}
