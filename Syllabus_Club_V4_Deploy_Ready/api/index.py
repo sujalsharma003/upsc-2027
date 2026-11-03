@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel,Field
 from . import core as c
 from . import gemini_client
+from . import source_text
 
 app=FastAPI(title='Syllabus Club V4 API',docs_url=None,redoc_url=None,openapi_url=None)
 MAX_PDF=4*1024*1024  # Keep below the Vercel request payload limit.
@@ -266,15 +267,24 @@ def analyze(article_id:str,user=Depends(get_user)):
             raise HTTPException(429,'Daily AI analysis limit reached. Continue tomorrow.')
         row=article_or_404(article_id,user['id'])
         text=(row.get('source_text') or '')
+        # Imported PIB/PRS rows may contain placeholder text. Always get
+        # article-specific evidence, not a navigation page or unrelated PRS items.
+        if row['source'] in ('PIB','PRS'):
+            try:
+                text=source_text.fetch_verified_article(row,c.safe_fetch)
+            except source_text.MissingSourceText as exc:
+                raise HTTPException(422,str(exc)) from exc
+            except httpx.HTTPError as exc:
+                raise HTTPException(422,'Official source could not be retrieved; try again later') from exc
+            # Cache verified public source material only. The original source
+            # title/date/URL remain untouched; no fabricated facts are stored.
+            if text!=row.get('source_text'):
+                c.rest_update('articles',{'source_text':text,'excerpt':text[:500]},
+                              {'id':f"eq.{row['id']}"})
+                row['source_text']=text
+                row['excerpt']=text[:500]
         if len(text.strip())<100:
-            # Read official source on demand. Do not fetch user-provided URLs.
-            if row['source'] in ('PIB','PRS') and row.get('url') and c.safe_source(row['url']):
-                from bs4 import BeautifulSoup
-                html=c.safe_fetch(row['url'])
-                soup=BeautifulSoup(html,'html.parser')
-                for t in soup.select('script,style,nav,header,footer,aside,form'):t.decompose()
-                text=' '.join((soup.select_one('article,main,#content') or soup).get_text(' ',strip=True).split())[:40000]
-        if len(text.strip())<100:raise HTTPException(422,'Not enough verified source text to generate notes')
+            raise HTTPException(422,'Not enough verified text in this source to generate notes')
         obj=gemini_client.generate(
             str(row.get('url') or row.get('file_name') or ''),
             row['published_date'],row['title'],text)
