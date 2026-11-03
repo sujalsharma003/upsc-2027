@@ -11,13 +11,20 @@ const niceDate=(date,opts={day:'numeric',month:'short'})=>new Date(date+'T12:00:
 const num=n=>Math.round(n*10)/10;
 const dayDiff=(a,b)=>Math.round((toMs(b)-toMs(a))/ms);
 const clampPlan=d=>d<SEED.startDate?SEED.startDate:d>SEED.endDate?SEED.endDate:d;
-const initial=()=>({topics:Object.fromEntries(SEED.topics.map(t=>[t.id,{status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false}])),completedTasks:{},readResources:{},notes:[],documents:[],reminders:[],tests:[],studySessions:[],timer:null,timerPrefs:{subject:'environment',mode:'stopwatch',taskId:''},createdAt:new Date().toISOString(),version:2});
+const initial=()=>({topics:Object.fromEntries(SEED.topics.map(t=>[t.id,{status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false}])),completedTasks:{},readResources:{},notes:[],documents:[],reminders:[],tests:[],practiceHistory:[],mistakeLog:[],topicWeakness:{},subjectWeakness:{},activePractice:null,aiBatchCheckpoint:null,studySessions:[],timer:null,timerPrefs:{subject:'environment',mode:'stopwatch',taskId:''},createdAt:new Date().toISOString(),version:2});
 let state;try{const saved=localStorage.getItem(STORE);state=saved?JSON.parse(saved):initial()}catch(e){state=initial()}
 if(!state||!state.topics)state=initial();
 for(const t of SEED.topics)if(!state.topics[t.id])state.topics[t.id]={status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false};
+if(!Array.isArray(state.practiceHistory))state.practiceHistory=[];
+if(!Array.isArray(state.mistakeLog))state.mistakeLog=[];
+if(!state.topicWeakness||typeof state.topicWeakness!=='object')state.topicWeakness={};
+if(!state.subjectWeakness||typeof state.subjectWeakness!=='object')state.subjectWeakness={};
+if(!state.activePractice||!Array.isArray(state.activePractice.questions))state.activePractice=null;
+if(!state.aiBatchCheckpoint||!Array.isArray(state.aiBatchCheckpoint.ids))state.aiBatchCheckpoint=null;
+
 for(const k of ['completedTasks','readResources'])if(!state[k])state[k]={};for(const k of ['notes','documents','reminders','tests','studySessions'])if(!Array.isArray(state[k]))state[k]=[];if(!state.timerPrefs)state.timerPrefs={subject:'environment',mode:'stopwatch',taskId:''};
 let caUI={online:null,ai:false,auto:false,items:[],lastSync:null,source:'all',tag:'all',status:'all',search:'',from:'',to:'',expanded:null,loading:false,busyId:null,error:'',bulk:null};
-let zenMode=false;let page='overview',day=clampPlan(todayISO()),weekIndex=between(Math.floor(dayDiff(SEED.startDate,day)/7),0,25),subjectFilter='all',statusFilter='all',query='',revisionFilter='all',noteQuery='',modal=null;
+let zenMode=false;let page='overview',day=clampPlan(todayISO()),weekIndex=between(Math.floor(dayDiff(SEED.startDate,day)/7),0,25),subjectFilter='all',statusFilter='all',query='',revisionFilter='all',revisionPageSize=40,noteQuery='',modal=null;
 const save=(cloud=true)=>{try{localStorage.setItem(STORE,JSON.stringify(state));if(cloud)window.SYLLABUS_CLOUD?.scheduleSave()}catch(e){toast('Local storage unavailable or full. Export a backup.')}};
 const topicStatus=t=>state.topics[t.id]?.status||t.status;
 const point=v=>({done:1,revision:.75,partial:.4,none:0}[v]||0);
@@ -67,7 +74,10 @@ function getDayTasks(d){
 }
 const taskDone=id=>!!state.completedTasks[id];
 function backlogTasks(){const end=todayISO()<=SEED.endDate?addDays(todayISO(),-1):SEED.endDate;if(end<SEED.startDate)return [];const out=[];for(let d=SEED.startDate;d<=end;d=addDays(d,1)){for(const t of getDayTasks(d))if(!taskDone(t.id))out.push({...t,date:d})}return out.reverse()}
-function dueTopics(){return SEED.topics.filter(t=>{const p=state.topics[t.id];return (p.status==='done'||p.status==='partial'||p.status==='revision')&&!p.ready&&(p.revisionStage===0||!p.revisionDue||p.revisionDue<=todayISO())}).sort((a,b)=>(state.topics[a.id].revisionDue||'0000').localeCompare(state.topics[b.id].revisionDue||'0000'))}
+function dueTopics(){return SEED.topics.filter(t=>{const p=state.topics[t.id];return !p.ready&&(
+ (p.revisionDue&&p.revisionDue<=todayISO())||
+ (p.status!=='none'&&(!p.revisionStage||!p.revisionDue)))
+}).sort((a,b)=>(state.topics[a.id].revisionDue||'0000').localeCompare(state.topics[b.id].revisionDue||'0000'))}
 const urgentReminders=()=>state.reminders.filter(r=>!r.done&&r.dueAt.slice(0,10)<=todayISO()).sort((a,b)=>a.dueAt.localeCompare(b.dueAt));
 function toast(msg){const el=$('#toast');el.textContent=msg;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),3200)}
 function heading(title,lede,tag='YOUR STUDY WORKSPACE'){return `<div class="eyebrow">${h(tag)}</div><h1 class="page-title">${h(title)}</h1><p class="page-lede">${h(lede)}</p>`}
@@ -304,13 +314,65 @@ function renderSyllabus(){const ss=stats();const list=SEED.topics.filter(t=>(sub
  <div class="section-heading"><h2>Individual topics</h2><span class="small-tag">${list.length} shown</span></div><div class="card"><div class="filters"><input class="input" id="topic-search" placeholder="Search syllabus topics…" value="${h(query)}"><select class="select" id="subject-filter"><option value="all">All subjects</option>${SEED.subjects.map(s=>`<option value="${s.id}" ${subjectFilter===s.id?'selected':''}>${h(s.short)}</option>`).join('')}</select><select class="select" id="status-filter"><option value="all">All statuses</option>${[['done','Completed'],['revision','Needs revision'],['partial','Partial'],['none','Not started']].map(([v,label])=>`<option value="${v}" ${statusFilter===v?'selected':''}>${label}</option>`).join('')}</select></div>
  <div class="table-wrap"><table class="tbl"><thead><tr><th>Topic</th><th>Priority</th><th>Status</th><th>Readiness</th></tr></thead><tbody>${list.map(t=>{const p=state.topics[t.id];return `<tr><td><span class="topic-text">${h(t.title)}</span><div class="subtext">${h(t.group)} · ${h(SEED.subjects.find(s=>s.id===t.subject).short)}</div></td><td><select aria-label="Priority for ${h(t.title)}" class="select" data-priority="${t.id}">${['A','B','C'].map(v=>`<option value="${v}" ${p.priority===v?'selected':''}>${v} ${v==='A'?'high':v==='B'?'medium':'selective'}</option>`).join('')}</select></td><td><select aria-label="Status for ${h(t.title)}" class="select" data-topic-status="${t.id}">${[['none','Not started'],['partial','Partial'],['done','Completed'],['revision','Needs revision']].map(([v,label])=>`<option value="${v}" ${p.status===v?'selected':''}>${label}</option>`).join('')}</select></td><td><button class="outline-btn" data-ready="${t.id}">${p.ready?'★ Exam-ready':'☆ Not verified'}</button></td></tr>`}).join('')}</tbody></table></div>${!list.length?'<div class="empty">No topics match the filters.</div>':''}</div>`;
 }
-function renderRevision(){const due=dueTopics();const items=SEED.topics.filter(t=>{const p=state.topics[t.id];return p.status!=='none'&&(revisionFilter==='all'||(revisionFilter==='due'&&due.some(x=>x.id===t.id))||(revisionFilter==='ready'&&p.ready)||(revisionFilter==='scheduled'&&p.revisionDue&&p.revisionDue>todayISO()))});const current=items.slice(0,65);
- return heading('Revision engine','Completed means covered, not remembered. Every topic requires spaced recall and question-based verification.','SPACED REPETITION')+
- `<div class="cards">${statCard('Needs initial/deferred revision',due.length,'Revision due or not yet started','↻')}${statCard('Scheduled follow-ups',SEED.topics.filter(t=>state.topics[t.id].revisionDue>todayISO()).length,'Day 1, 7, 21, 45 cycle','▦')}${statCard('Exam-ready',stats().ready,'Based on your explicit verification','★')}${statCard('Covered but unverified',stats().done-stats().ready,'Readiness tracked independently','◎')}</div>
- <div class="notice" style="margin-top:16px">Your 103 completed topics were imported without invented revision dates. They enter the initial revision queue; clicking <strong>Mark revised</strong> schedules the next review. Initial imported statuses remain unchanged.</div>
- <div class="section-heading"><h2>Topic revision queue</h2><select class="select" id="revision-filter" style="width:auto"><option value="all" ${revisionFilter==='all'?'selected':''}>All covered & partial</option><option value="due" ${revisionFilter==='due'?'selected':''}>Due now</option><option value="scheduled" ${revisionFilter==='scheduled'?'selected':''}>Scheduled later</option><option value="ready" ${revisionFilter==='ready'?'selected':''}>Exam-ready</option></select></div>
- <div class="card">${current.map(t=>{const p=state.topics[t.id],d=p.revisionDue;return `<div class="mini-item"><div style="flex:1;min-width:0"><strong class="small">${h(t.title)}</strong><div class="subtext">${h(t.group)} · ${p.revisionStage===0?'First serious revision pending':d?'Next review '+niceDate(d):'Revision complete'} · Stage ${p.revisionStage}</div></div><button class="outline-btn" data-revise="${t.id}">Mark revised ✓</button></div>`}).join('')}${items.length>65?`<p class="small text-muted">Showing first 65 of ${items.length} topics. Choose a filter to narrow the list.</p>`:''}${!items.length?'<div class="empty">No topics in this view.</div>':''}</div>`;
+
+const REVISION_INTERVALS=[1,3,7,15,30,60];
+function revisionWeakScore(tid){return Math.max(0,Number(state.topicWeakness[tid])||0)}
+function topicRevisionDate(t){return state.topics[t.id]?.revisionDue||null}
+function gradeRecall(tid,quality){
+ const topic=SEED.topics.find(t=>t.id===tid);if(!topic)return;
+ const p=state.topics[tid];if(!p)return;
+ const weak=quality==='hard';
+ if(weak){
+   state.topicWeakness[tid]=Math.min(30,revisionWeakScore(tid)+2);
+   p.revisionStage=0;p.revisionDue=addDays(todayISO(),1);p.ready=false;
+ }else{
+   state.topicWeakness[tid]=Math.max(0,revisionWeakScore(tid)-1);
+   const current=Number(p.revisionStage)||0;
+   p.revisionDue=addDays(todayISO(),REVISION_INTERVALS[Math.min(current,REVISION_INTERVALS.length-1)]);
+   p.revisionStage=Math.min(REVISION_INTERVALS.length,current+1);
+   if(p.status==='none')p.status='partial';
+ }
+ save();render();
+ toast(weak?'Added to weak topics · revisit tomorrow':'Recall saved · next review '+niceDate(p.revisionDue));
 }
+function renderRevision(){
+ const due=dueTopics(),today=todayISO(),subjectOptions=[['all','All subjects'],...SEED.subjects.map(s=>[s.id,s.short])];
+ const all=SEED.topics.filter(t=>{
+   const p=state.topics[t.id];
+   return (revisionFilter==='all'||revisionFilter==='due'&&due.some(x=>x.id===t.id)||
+      revisionFilter==='weak'&&revisionWeakScore(t.id)>0||
+      revisionFilter==='unstarted'&&p.status==='none'||
+      revisionFilter==='scheduled'&&p.revisionDue>today||
+      revisionFilter==='ready'&&p.ready)&&
+      (subjectFilter==='all'||t.subject===subjectFilter);
+ });
+ all.sort((a,b)=>revisionWeakScore(b.id)-revisionWeakScore(a.id)||
+     (topicRevisionDate(a)||'0000').localeCompare(topicRevisionDate(b)||'0000'));
+ const current=all.slice(0,revisionPageSize);
+ const upcoming=SEED.topics.filter(t=>state.topics[t.id].revisionDue&&
+      state.topics[t.id].revisionDue>=today&&
+      state.topics[t.id].revisionDue<=addDays(today,30));
+ const byDay={};for(const t of upcoming){const d=topicRevisionDate(t);(byDay[d]||=[]).push(t)}
+ const groups=Object.keys(byDay).sort().slice(0,16).map(d=>'<div class="revision-day"><strong>'+h(niceDate(d,{day:'numeric',month:'short'}))+'</strong><span>'+byDay[d].length+' topic(s)</span><small>'+h(byDay[d].slice(0,3).map(t=>t.title).join(' · '))+'</small></div>').join('');
+ return heading('Smart revision calendar','Complete syllabus coverage with recall stages on days 1, 3, 7, 15, 30 and 60. Weak topics are brought forward.','ALL 187 TOPICS / SPACED RECALL')+
+  '<div class="cards">'+
+  statCard('Total syllabus topics',SEED.topics.length,'Across all subjects','◫')+
+  statCard('Due to recall',due.length,'Includes weak topics','↻')+
+  statCard('Need to learn',SEED.topics.filter(t=>state.topics[t.id].status==='none').length,'No false completion','◎')+
+  statCard('Weak topics',SEED.topics.filter(t=>revisionWeakScore(t.id)>0).length,'From recall and quiz errors','!')+
+  '</div>'+
+  '<div class="revision-calendar"><div class="section-heading"><h2>Next 30 days</h2><span class="small-tag">All subjects</span></div><div class="revision-calendar-grid">'+
+  (groups||'<p class="small text-muted">No future reviews scheduled yet. Mark topics revised or complete recall practice to build your calendar.</p>')+
+  '</div></div>'+
+  '<div class="section-heading"><div><h2>Full syllabus review queue</h2><p>Unstarted topics stay visible as learning targets; they are not marked learned automatically.</p></div><span class="small-tag">'+all.length+' topics</span></div>'+
+  '<div class="practice-filters"><select class="select" id="revision-filter" aria-label="Revision list filter">'+
+  [['all','All topics'],['due','Due now'],['weak','Weak topics'],['unstarted','To learn'],['scheduled','Scheduled'],['ready','Exam-ready']].map(([v,label])=>'<option value="'+v+'" '+(revisionFilter===v?'selected':'')+'>'+label+'</option>').join('')+
+  '</select><select class="select" id="revision-subject" aria-label="Revision subject">'+subjectOptions.map(([v,label])=>'<option value="'+h(v)+'" '+(subjectFilter===v?'selected':'')+'>'+h(label)+'</option>').join('')+'</select></div>'+
+  '<div class="card">'+current.map(t=>{const p=state.topics[t.id],weak=revisionWeakScore(t.id),d=p.revisionDue;return '<div class="mini-item revision-topic"><div style="flex:1;min-width:0"><strong class="small">'+h(t.title)+'</strong><div class="subtext">'+h(t.group)+' · '+h(SEED.subjects.find(s=>s.id===t.subject)?.short||t.subject)+' · '+(p.status==='none'?'Not studied yet':d?'Next recall '+h(niceDate(d)):'First recall needed')+' · Stage '+(p.revisionStage||0)+(weak?' · Weakness '+weak:'')+'</div></div><div class="revision-actions"><button class="outline-btn" data-recall-hard="'+h(t.id)+'">Needs work</button><button class="primary-btn" data-recall-good="'+h(t.id)+'">Remembered ✓</button></div></div>'}).join('')+
+  (!all.length?'<div class="empty">No topics match this filter.</div>':'')+
+  (all.length>current.length?'<div class="practice-more"><button class="outline-btn" data-revision-more>Show more · '+(all.length-current.length)+' remaining</button></div>':'')+'</div>';
+}
+
 function renderNotes(){const notes=state.notes.filter(n=>`${n.title} ${n.body} ${n.subject}`.toLowerCase().includes(noteQuery.toLowerCase()));return heading('Knowledge notebook','Write short revision notes, tag them to subjects and topics, and keep mistakes easy to retrieve.','NOTES LIBRARY')+
  `<div class="section-heading"><h2>My notes <span class="text-muted tiny">(${state.notes.length})</span></h2><button class="primary-btn" data-modal="note">+ New note</button></div><div class="filters"><input class="input" id="note-search" placeholder="Search notes, keywords and subjects…" value="${h(noteQuery)}"></div>
  ${notes.length?`<div class="note-grid">${notes.map(n=>`<div class="note-card"><div class="small-tag" style="align-self:flex-start">${h(SEED.subjects.find(s=>s.id===n.subject)?.short||'General')}</div><div class="note-title">${h(n.title)}</div><div class="note-excerpt">${h(n.body.slice(0,155))}${n.body.length>155?'…':''}</div><div class="subtext">Updated ${h(n.updatedAt?.slice(0,10)||'')}</div><div class="page-action"><button class="outline-btn" data-edit-note="${h(n.id)}">Edit</button><button class="outline-btn danger-btn" data-delete-note="${h(n.id)}">Delete</button></div></div>`).join('')}</div>`:'<div class="empty">No notes yet. Start with a one-page summary of your first Environment topic.</div>'}`;
@@ -354,7 +416,7 @@ function weeklyBrief(i){const w=SEED.weeks[i],ds=weekDates(i);let text=`# UPSC P
  for(let n=0;n<7;n++){const d=addDays(ds.start,n);if(d>SEED.endDate)break;text+=`\n### ${niceDate(d,{weekday:'long',day:'numeric',month:'long'})} (${d})\n`+getDayTasks(d).map(t=>`- [${taskDone(t.id)?'x':' '}] ${t.title} (${t.minutes} min): ${t.detail}`).join('\n')+'\n'}
  text+='\n## End of week review\n- Topics still unfinished:\n- MCQs attempted / accuracy:\n- Mistakes to revisit:\n- Documents completed:\n- CSAT weak areas:\n- Next-week rescheduling decisions:\n';return text}
 const rid=()=>crypto.randomUUID?.()||`${Date.now().toString(36)}-${Math.random().toString(36).slice(2,9)}`;
-function nextRevision(tid){const p=state.topics[tid],interval=[1,7,21,45,60,60],stage=between(p.revisionStage||0,0,interval.length-1);p.revisionStage=stage+1;p.revisionDue=addDays(todayISO(),interval[stage]);if(p.status==='none')p.status='partial';save();render();toast(`Revision logged · next recall ${niceDate(p.revisionDue)}`)}
+function nextRevision(tid){gradeRecall(tid,'good')}
 function openDB(){return new Promise((resolve,reject)=>{if(!window.indexedDB)return reject(Error('IndexedDB unsupported'));const req=indexedDB.open('upsc-cc-files',1);req.onupgradeneeded=()=>req.result.createObjectStore('files',{keyPath:'id'});req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
 async function putFile(id,file){if(window.SYLLABUS_CLOUD?.loggedIn)return window.SYLLABUS_CLOUD.uploadDocument(id,file);const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction('files','readwrite');tx.objectStore('files').put({id,file});tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}
 async function getFile(id){const db=await openDB();let result=await new Promise((res,rej)=>{const req=db.transaction('files').objectStore('files').get(id);req.onsuccess=()=>res(req.result?.file);req.onerror=()=>rej(req.error)});db.close();return result}
@@ -398,6 +460,9 @@ async function handleClick(e){const el=e.target.closest('button');if(!el)return;
  if(el.dataset.shift){day=clampPlan(addDays(day,Number(el.dataset.shift)));weekIndex=Math.floor(dayDiff(SEED.startDate,day)/7);render();return}
  if(el.dataset.week!==undefined){weekIndex=Number(el.dataset.week);render();window.scrollTo(0,0);return}
  if(el.dataset.brief!==undefined){const i=Number(el.dataset.brief);download(weeklyBrief(i),`UPSC-2027-week-${String(i+1).padStart(2,'0')}-brief.md`,'text/markdown');return}
+ if(el.dataset.recallGood){gradeRecall(el.dataset.recallGood,'good');return}
+ if(el.dataset.recallHard){gradeRecall(el.dataset.recallHard,'hard');return}
+ if(el.dataset.revisionMore!==undefined){revisionPageSize+=60;render();return}
  if(el.dataset.revise){nextRevision(el.dataset.revise);return}
  if(el.dataset.ready){const p=state.topics[el.dataset.ready];if(p.status!=='done')return toast('Mark the topic Completed and verify it with questions first.');p.ready=!p.ready;save();render();toast(p.ready?'Topic marked exam-ready':'Exam-ready flag removed');return}
  if(el.dataset.modal){modal={type:el.dataset.modal};render();return}
@@ -424,7 +489,8 @@ function handleChange(e){const t=e.target;
  if(t.dataset.priority){state.topics[t.dataset.priority].priority=t.value;save();render();return}
  if(t.id==='subject-filter'){subjectFilter=t.value;render();return}
  if(t.id==='status-filter'){statusFilter=t.value;render();return}
- if(t.id==='revision-filter'){revisionFilter=t.value;render();return}
+ if(t.id==='revision-filter'){revisionFilter=t.value;revisionPageSize=40;render();return}
+ if(t.id==='revision-subject'){subjectFilter=t.value;revisionPageSize=40;render();return}
  if(t.id==='day-picker'){day=clampPlan(t.value);weekIndex=Math.floor(dayDiff(SEED.startDate,day)/7);render();return}
  if(t.id==='file-upload'){handleUpload(t.files?.[0]);return}
  if(t.id==='import-input'&&t.files?.length){const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result)),incoming=parsed.data;if(!incoming||typeof incoming.topics!=='object'||!Array.isArray(incoming.notes)||!Array.isArray(incoming.tests))throw Error('Invalid backup format');if(!confirm('Restore backup? This replaces current progress and note metadata, but not file bytes.'))return;state=incoming;if(!Array.isArray(state.studySessions))state.studySessions=[];if(!state.timerPrefs)state.timerPrefs={subject:'environment',mode:'stopwatch',taskId:''};if(state.timer?.status==='running')state.timer.status='paused';for(const x of SEED.topics)if(!state.topics[x.id])state.topics[x.id]={status:x.status,priority:x.priority,revisionStage:0,revisionDue:null,ready:false};save();render();toast('Backup restored')}catch(err){toast('Invalid JSON backup')}};reader.readAsText(t.files[0]);return}
