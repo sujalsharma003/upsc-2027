@@ -13,6 +13,8 @@ import httpx
 from bs4 import BeautifulSoup
 
 PIB = 'https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=1'
+# PIB publishes multiple official English feed listings; try a second one only if the first fails.
+PIB_ALTERNATE = 'https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3'
 PRS = 'https://prsindia.org/policy/monthly-policy-review'
 ALLOWED = {'pib.gov.in', 'www.pib.gov.in', 'prsindia.org', 'www.prsindia.org'}
 TAG_TERMS = {
@@ -139,17 +141,38 @@ def safe_source(url):
        and not p.username and not p.password)
 
 def safe_fetch(url):
-    if not safe_source(url):raise ValueError('External source is not allowlisted')
+    """Fetch an allowlisted official source through bounded, HTTPS-only redirects.
+
+    PIB has been seen returning 301 to www.pib.gov.in followed by 302.
+    Our previous single-hop fetch raised on the second redirect.
+    """
+    seen=set()
+    current=url
     with httpx.Client(timeout=8,follow_redirects=False,headers={
-      'User-Agent':'SyllabusClubStudyResearch/4.0 (personal noncommercial educational reader)'}) as c:
-        r=c.get(url)
-        if 300<=r.status_code<400:
-            dest=urljoin(url,r.headers.get('location',''))
-            if not safe_source(dest):raise ValueError('Unsafe source redirect')
-            r=c.get(dest)
-    r.raise_for_status()
-    if len(r.content)>2_000_000:raise ValueError('Source response too large')
-    return r.text
+      'User-Agent':'SyllabusClubStudyResearch/4.1 (personal noncommercial educational reader)',
+      'Accept':'application/rss+xml, application/xml, text/xml, text/html;q=0.8'
+    }) as c:
+        for _ in range(6):
+            if not safe_source(current):
+                raise ValueError('External source or redirect is not allowlisted')
+            if current in seen:
+                raise ValueError('Official source redirect loop')
+            seen.add(current)
+            r=c.get(current)
+            if 300 <= r.status_code < 400:
+                location=r.headers.get('location')
+                if not location:
+                    raise ValueError(f'Official source returned redirect {r.status_code} without location')
+                dest=urljoin(current,location)
+                if not safe_source(dest):
+                    raise ValueError('Unsafe official source redirect')
+                current=dest
+                continue
+            r.raise_for_status()
+            if len(r.content)>2_000_000:
+                raise ValueError('Source response too large')
+            return r.text
+    raise ValueError('Official source exceeded safe redirect limit')
 
 def parse_pib(xml):
     items=[]
@@ -196,16 +219,29 @@ def ingest_public_sources():
     result={'ran_at':utcnow(),'added':0,'errors':[],'sources':{}}
     for source,url,parser,limit in [('PIB',PIB,parse_pib,45),('PRS',PRS,parse_prs,8)]:
         try:
-            raw=safe_fetch(url)
-            parsed=parser(raw)[:limit]
+            # Try PIB's second official English feed only when primary fails/has no items.
+            urls=[PIB,PIB_ALTERNATE] if source=='PIB' else [url]
+            parsed=[]
+            last_error=None
+            for source_url in urls:
+                try:
+                    raw=safe_fetch(source_url)
+                    parsed=parser(raw)[:limit]
+                    if not parsed:
+                        raise ValueError('No valid articles found in official source response')
+                    break
+                except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                    last_error=e
+            if not parsed:
+                raise last_error or ValueError('No source articles')
             rows=[as_article(p) for p in parsed]
-            if rows:
-                # Ignore duplicate IDs; never replace previously approved analyses.
-                added=rest_write('articles',rows,on_conflict='id',ignore_duplicates=True)
-                result['added']+=len(added)
-            result['sources'][source]={'found':len(rows),'added':len(added) if rows else 0}
+            # Ignore duplicate IDs; never replace previously approved analyses.
+            added=rest_write('articles',rows,on_conflict='id',ignore_duplicates=True)
+            result['added']+=len(added)
+            result['sources'][source]={'found':len(rows),'added':len(added)}
         except (RuntimeError,ValueError,httpx.HTTPError,ET.ParseError) as e:
-            result['errors'].append(f'{source}: {type(e).__name__}')
+            detail=f'HTTP {e.response.status_code}' if isinstance(e,httpx.HTTPStatusError) else str(e)[:75] if isinstance(e,ValueError) else type(e).__name__
+            result['errors'].append(f'{source}: {detail}')
     return result
 
 def new_token():return secrets.token_urlsafe(32)

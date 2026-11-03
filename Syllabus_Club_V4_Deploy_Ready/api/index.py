@@ -311,17 +311,20 @@ def cron_ingest(authorization:str|None=Header(default=None)):
 
 def run_ingestion(manual:bool):
     try:
-        last=c.rest_rows('ingestion_runs',{'order':'started_at.desc','select':'started_at'},1)
+        last=c.rest_rows('ingestion_runs',{'order':'started_at.desc','select':'started_at,errors'},1)
         if last:
             age=(datetime.now(timezone.utc)-datetime.fromisoformat(last[0]['started_at'].replace('Z','+00:00'))).total_seconds()
-            if age<(7200 if manual else 3600):
-                return {'ran_at':last[0]['started_at'],'added':0,'errors':[],
+            # Let the owner retry a failed upstream feed after 5 minutes rather than
+            # locking the broken source out for the normal 2-hour refresh interval.
+            previous_errors=last[0].get('errors') or []
+            interval=300 if manual and previous_errors else (7200 if manual else 3600)
+            if age<interval:
+                return {'ran_at':last[0]['started_at'],'added':0,'errors':previous_errors,
                     'skipped':True,'message':'Sources were checked recently'}
         result=c.ingest_public_sources()
         c.rest_write('ingestion_runs',[{'id':str(uuid.uuid4()),'started_at':result['ran_at'],
             'finished_at':c.utcnow(),'items_added':result['added'],'errors':result['errors']}])
         return result
-    except RuntimeError as e:raise hidden(e)
 
 @app.get('/')
 def api_root():
