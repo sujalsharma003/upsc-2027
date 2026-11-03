@@ -231,8 +231,8 @@ async function caBulkGenerate(resume=false){
    caUI.error='All imported articles already have saved Gemini notes.';
    caStableRender();return;
  }
- if(!confirm((resume?'Resume':'Start')+' Gemini generation for '+queue.length+' remaining articles?\\n'+
-    'Generated today: '+usage+'. Gemini API quotas and possible billing charges apply.\\n'+
+ if(!confirm((resume?'Resume':'Start')+' Gemini generation for '+queue.length+' remaining articles?\n'+
+    'Generated today: '+usage+'. Gemini API quotas and possible billing charges apply.\n'+
     'Completed articles are skipped. Keep this tab open while generating; you can stop and resume later.'))return;
  const b={ids,completedIds:[...completed],running:true,stop:false,
    total:ids.length,done:completed.size,success:successes,

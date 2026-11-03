@@ -124,3 +124,6 @@
  .practice-option{padding:11px}
  .practice-recall-focus{padding:13px}
 }
+
+/* Keep new Practice Studio navigation reachable on shorter desktop screens */
+@media(min-width:901px){.sidebar .nav{min-height:0;flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#484356 transparent}.sidebar .side-bottom{flex-shrink:0}}
