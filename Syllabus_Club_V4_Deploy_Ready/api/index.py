@@ -363,4 +363,6 @@ def _prs_layout_probe():
         if '.pdf' in href.lower() or 'pdf' in a.get_text(' ',strip=True).lower():
             result['pdf_links'].append({'text':a.get_text(' ',strip=True)[:80],'href':href[:230]})
         if len(result['pdf_links'])>=8:break
+    extracted=c.parse_prs_highlights(c.safe_fetch(url),url,'2026-10')
+    result['extraction_check']={'count':len(extracted),'titles':[r['title'] for r in extracted[:18]],'dates':sorted(set(r['published_date'] for r in extracted))}
     return result
