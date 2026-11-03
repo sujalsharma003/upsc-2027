@@ -124,9 +124,11 @@ def article_status(article_id:str,body:StatusUpdate,user=Depends(get_user)):
         existing=c.rest_rows('article_progress',{'user_id':f'eq.{user["id"]}',
              'article_id':f'eq.{article_id}'},1)
         previous=existing[0] if existing else {}
+        # First read schedules an active-recall check; preserve an existing plan.
+        first_due=(date.today()+timedelta(days=1)).isoformat() if body.status=='read' and not previous.get('revision_due') else previous.get('revision_due')
         p=c.rest_write('article_progress',[{'user_id':user['id'],'article_id':article_id,
             'read_status':body.status,'revision_stage':previous.get('revision_stage',0),
-            'revision_due':previous.get('revision_due'), 'updated_at':c.utcnow()}],
+            'revision_due':first_due, 'updated_at':c.utcnow()}],
             on_conflict='user_id,article_id')
         return c.flatten_article(row,p[0] if p else {'read_status':body.status})
     except RuntimeError as e:raise hidden(e)
@@ -335,3 +337,13 @@ def api_root():
 
 
 
+
+
+@app.get('/api/_study_engine_check')
+def study_engine_check():
+    """Non-sensitive sample check used only on a preview branch."""
+    sample={'title':'RBI announces monetary policy update','source':'PIB',
+        'tags':['Economy'],'relevance':77,'excerpt':'See official source for release.'}
+    g=c.study_guidance(sample)
+    return {'guide':g,'has_guidance_in_article':bool(c.flatten_article(sample).get('study_guidance')),
+      'high_priority':g['priority']=='high','has_active_recall':len(g['recall_questions'])>=2}
