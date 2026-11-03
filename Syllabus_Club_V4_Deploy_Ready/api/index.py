@@ -331,3 +331,40 @@ def run_ingestion(manual:bool):
 def api_root():
     from fastapi.responses import RedirectResponse
     return RedirectResponse('/index.html',status_code=307)
+
+
+@app.get('/api/_source_structure_check')
+def diagnose_official_sources():
+    """Temporary metadata inspection of official public sources. No credentials or user data."""
+    from bs4 import BeautifulSoup
+    sources={
+      'pib_list':c.PIB_ALL,
+      'pib_listing_lower':'https://www.pib.gov.in/allrelease.aspx?lang=1&reg=1',
+      'pib_rss':c.PIB,
+      'prs_archive':c.PRS,
+      'prs_latest':'https://prsindia.org/policy/monthly-policy-review/october-2026',
+    }
+    info={}
+    for label,url in sources.items():
+        try:
+            html=c.safe_fetch(url)
+            soup=BeautifulSoup(html,'html.parser')
+            links=[a for a in soup.select('a[href]') if 'pressrelease' in (a.get('href','')).lower() or '/policy/monthly-policy-review/' in a.get('href','').lower()]
+            info[label]={
+              'length':len(html),
+              'title':soup.title.get_text(' ',strip=True)[:140] if soup.title else None,
+              'prefix':html[:360],
+              'links_found':len(links),
+              'sample_links':[{
+                'href':a.get('href','')[:220],
+                'text':a.get_text(' ',strip=True)[:130],
+                'parent':a.parent.get_text(' ',strip=True)[:230] if a.parent else ''
+              } for a in links[:8]],
+              'posted_count':html.lower().count('posted on'),
+              'html_anchors':len(soup.select('a[href]')),
+              'script_count':len(soup.select('script')),
+            }
+        except Exception as e:
+            info[label]={'error_type':type(e).__name__, 'error':str(e)[:120]}
+    return info
+
