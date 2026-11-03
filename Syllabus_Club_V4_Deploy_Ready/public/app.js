@@ -155,14 +155,14 @@ function caBulkMarkup(){
  if(!b)return '';
  const pct=b.total?Math.round(b.done/b.total*100):0;
  const status=b.running?(b.stop?'Stopping after this article…':'Generating official-source notes…'):'Batch finished';
- return \`<section class="ca-bulk-panel" aria-label="Gemini batch generation progress" role="status" aria-live="polite">
-   <div class="ca-bulk-head"><strong>✳ GEMINI BATCH PROGRESS</strong><span data-ca-bulk-pct>\${pct}%</span></div>
-   <div class="ca-bulk-meter" role="progressbar" aria-label="Gemini notes processed" aria-valuemin="0" aria-valuemax="\${b.total}" aria-valuenow="\${b.done}" data-ca-bulk-meter><i data-ca-bulk-fill style="width:\${pct}%"></i></div>
-   <div class="ca-bulk-info"><span data-ca-bulk-status>\${h(status)}</span><span data-ca-bulk-count>\${b.done}/\${b.total} processed · \${b.success} saved · \${b.failed} failed</span></div>
-   <p class="ca-bulk-current" data-ca-bulk-current>\${h(b.current||'')}</p>
-   \${b.running?'<button class="ca-bulk-stop" data-ca-bulk-stop type="button">■ Stop after current</button>':''}
+ return `<section class="ca-bulk-panel" aria-label="Gemini batch generation progress" role="status" aria-live="polite">
+   <div class="ca-bulk-head"><strong>✳ GEMINI BATCH PROGRESS</strong><span data-ca-bulk-pct>${pct}%</span></div>
+   <div class="ca-bulk-meter" role="progressbar" aria-label="Gemini notes processed" aria-valuemin="0" aria-valuemax="${b.total}" aria-valuenow="${b.done}" data-ca-bulk-meter><i data-ca-bulk-fill style="width:${pct}%"></i></div>
+   <div class="ca-bulk-info"><span data-ca-bulk-status>${h(status)}</span><span data-ca-bulk-count>${b.done}/${b.total} processed · ${b.success} saved · ${b.failed} failed</span></div>
+   <p class="ca-bulk-current" data-ca-bulk-current>${h(b.current||'')}</p>
+   ${b.running?'<button class="ca-bulk-stop" data-ca-bulk-stop type="button">■ Stop after current</button>':''}
    <p class="ca-bulk-help">This runs sequentially while the page stays open. Gemini daily quota applies; notes already saved are skipped.</p>
-  </section>\`;
+  </section>`;
 }
 function caBulkPaint(){
  const b=caUI.bulk;if(!b)return;
