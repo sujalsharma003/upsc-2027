@@ -456,3 +456,26 @@ def _prs_exact_structure_v6():
             n=n.parent
         out[term]=parents
     return out
+
+
+@app.get('/api/_extraction_check_v6')
+def _extraction_check_v6():
+    """Temporary preview-only check of two fixed official source pages."""
+    examples=[
+      {'source':'PIB','title':'Prime Minister Shri Narendra Modi inaugurates and lays foundation stone of Pune Metro projects worth around ₹21,800 Crore',
+       'url':'https://www.pib.gov.in/PressReleseDetail.aspx?PRID=2332011'},
+      {'source':'PRS','title':'PRS: Repo rate increased to 5.5%',
+       'url':'https://prsindia.org/policy/monthly-policy-review/october-2026'},
+      {'source':'PRS','title':'PRS Monthly Policy Review — October 2026',
+       'url':'https://prsindia.org/policy/monthly-policy-review/october-2026'}
+    ]
+    out={}
+    for row in examples:
+        try:
+            found=source_text.fetch_verified_article(row,c.safe_fetch)
+            out[row['source']+'_'+row['title'][:20]]={
+              'chars':len(found),'start':found[:480],
+              'end':found[-120:]}
+        except Exception as exc:
+            out[row['source']+'_'+row['title'][:20]]={'error':type(exc).__name__+': '+str(exc)[:200]}
+    return out
