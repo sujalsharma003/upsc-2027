@@ -231,3 +231,42 @@ def test_gemini_api_is_server_side(monkeypatch):
     assert seen['headers']['x-goog-api-key']=='dummy-secret'
     assert 'dummy-secret' not in seen['url']
     assert seen['body']['generationConfig']['responseMimeType']=='application/json'
+
+
+def test_pib_source_extracts_only_matching_release_body():
+    from api.source_text import parse_pib_article
+    html = '''<main><div class="innner-page-main-about-us-content-right-part">
+      <h1>RBI announces new banking policy changes</h1>
+      <p>The regulator announced a detailed measure concerning bank liquidity requirements and
+         statutory oversight provisions for eligible financial institutions in the country.</p>
+      <p>These provisions include additional disclosure and supervisory controls for regulated
+         banking institutions and detailed reporting measures for the policy changes.</p>
+      <span>Release ID: 123456</span></div></main>'''
+    text=parse_pib_article(html,'RBI announces new banking policy changes','123456')
+    assert 'statutory oversight' in text
+    assert 'Release ID: 123456' not in text or 'Verified release ID: 123456' in text
+    with pytest.raises(ValueError):
+        parse_pib_article(html,'Entirely unrelated school announcement','123456')
+
+def test_prs_source_links_selected_highlight_to_own_paragraph():
+    from api.source_text import parse_prs_article
+    html='''<div class="view-policy-reviews"><div class="view-content">
+      <p><strong>Repo rate increased to 5.5% (p. 2)</strong></p>
+      <p>RBI committee increased the repo rate from 5.25 percent to 5.5 percent
+         and revised other corridor policy rates accordingly.</p>
+      <p><strong>GST Council recommends changes (p. 3)</strong></p>
+      <p>The council recommended simpler registrations for small enterprises
+         and a modified refund process for the tax administration.</p>
+      </div></div>'''
+    text=parse_prs_article(html,'PRS: Repo rate increased to 5.5%','2026-10')
+    assert 'repo rate from 5.25 percent' in text
+    assert 'refund process' not in text
+    with pytest.raises(ValueError):
+        parse_prs_article(html,'PRS: Unrelated international treaty','2026-10')
+
+def test_source_host_and_release_id_are_verified():
+    from api.source_text import fetch_verified_article
+    with pytest.raises(ValueError):
+        fetch_verified_article(
+            {'source':'PIB','url':'https://evil.example/PressReleseDetail.aspx?PRID=123',
+             'title':'Government announcement'}, lambda url:'unreachable')
