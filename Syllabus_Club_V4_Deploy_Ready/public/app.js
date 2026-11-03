@@ -198,7 +198,7 @@ async function caBulkGenerate(){
  const queue=pending.slice(0,amount);
  const b={running:true,stop:false,total:queue.length,done:0,success:0,failed:0,current:'Preparing first article…'};
  caUI.bulk=b;caUI.error='';
- render();
+ caStableRender();
  let consecutiveErrors=0;
  for(const row of queue){
    if(b.stop)break;
