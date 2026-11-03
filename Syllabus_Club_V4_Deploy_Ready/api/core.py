@@ -314,7 +314,141 @@ def parse_prs_highlights(html, monthly_url, issue_month):
         label=re.sub(r'\s+',' ',strong.get_text(' ',strip=True)).strip()
         if not (20<=len(label)<=280 and re.search(r'\(p\.\s*\d+\)',label,re.I)):
             continue
-        title=re.sub(r'\s*\(p\.\s*\d+\)\s*        if len(title)<20 or title.lower() in seen:continue
+        title=re.sub(r'\s*\(p\.\s*\d+\)\s*
+        seen.add(title.lower())
+        items.append({'title':'PRS: '+title,'url':monthly_url,
+            'published_date':issue_month+'-01','date_precision':'month','source':'PRS',
+            'source_text':'PRS Monthly Policy Review '+issue_month+
+            ' highlights: '+title+'. This item is part of the monthly review, not a standalone dated release.'})
+        if len(items)>=35:break
+    return items
+
+
+def as_article(row,owner_id=None):
+    tags,relevance=classify(row['title'],row.get('source_text',''))
+    unique='|'.join([row['source'],row.get('url') or '',row['title'],row['published_date'],owner_id or ''])
+    digest=hashlib.sha256(unique.encode()).hexdigest()
+    return {'id':str(uuid.uuid5(uuid.NAMESPACE_URL,digest)), 'owner_id':owner_id,
+        'source':row['source'],'url':row.get('url'), 'title':row['title'][:450],
+        'published_date':row['published_date'],'date_precision':row.get('date_precision','day'),
+        'source_text':row.get('source_text','')[:40000],
+        'excerpt':row.get('source_text','')[:500], 'tags':tags,'relevance':relevance,
+        'content_hash':digest}
+
+def ingest_public_sources():
+    result={'ran_at':utcnow(),'added':0,'errors':[],'sources':{}}
+    for source,url,parser,limit in [('PIB',PIB,parse_pib,45),('PRS',PRS,parse_prs,8)]:
+        try:
+            # Try PIB's second official English feed only when primary fails/has no items.
+            urls=[PIB,PIB_ALTERNATE,PIB_LEGACY] if source=='PIB' else [url]
+            parsed=[]
+            last_error=None
+            for source_url in urls:
+                try:
+                    raw=safe_fetch(source_url)
+                    parsed=parser(raw)[:limit]
+                    if not parsed:
+                        raise ValueError('No valid articles found in official source response')
+                    break
+                except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                    last_error=e
+            if not parsed and source=='PIB':
+                try:
+                    parsed=parse_pib_listing(safe_fetch(PIB_ALL))[:limit]
+                except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                    last_error=e
+            if not parsed:
+                raise last_error or ValueError('No source articles')
+            if source=='PRS':
+                for review in list(parsed[:3]):
+                    try:
+                        details=parse_prs_highlights(safe_fetch(review['url']),review['url'],review['published_date'][:7])
+                        parsed.extend(details)
+                    except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                        result['errors'].append('PRS highlights: '+type(e).__name__)
+                parsed=parsed[:100]
+            rows=[as_article(p) for p in parsed]
+            # Ignore duplicate IDs; never replace previously approved analyses.
+            added=rest_write('articles',rows,on_conflict='id',ignore_duplicates=True)
+            result['added']+=len(added)
+            result['sources'][source]={'found':len(rows),'added':len(added)}
+        except (RuntimeError,ValueError,httpx.HTTPError,ET.ParseError) as e:
+            detail=f'HTTP {e.response.status_code}' if isinstance(e,httpx.HTTPStatusError) else str(e)[:150] if isinstance(e,ValueError) else type(e).__name__
+            result['errors'].append(f'{source}: {detail}')
+    return result
+
+def new_token():return secrets.token_urlsafe(32)
+,'',label,flags=re.I).strip()
+        if '\">' in title:
+            title=title.rsplit('\">',1)[-1].strip()
+        if len(title)<20 or title.lower() in seen:continue
+        seen.add(title.lower())
+        items.append({'title':'PRS: '+title,'url':monthly_url,
+            'published_date':issue_month+'-01','date_precision':'month','source':'PRS',
+            'source_text':'PRS Monthly Policy Review '+issue_month+
+            ' highlights: '+title+'. This item is part of the monthly review, not a standalone dated release.'})
+        if len(items)>=35:break
+    return items
+
+
+def as_article(row,owner_id=None):
+    tags,relevance=classify(row['title'],row.get('source_text',''))
+    unique='|'.join([row['source'],row.get('url') or '',row['title'],row['published_date'],owner_id or ''])
+    digest=hashlib.sha256(unique.encode()).hexdigest()
+    return {'id':str(uuid.uuid5(uuid.NAMESPACE_URL,digest)), 'owner_id':owner_id,
+        'source':row['source'],'url':row.get('url'), 'title':row['title'][:450],
+        'published_date':row['published_date'],'date_precision':row.get('date_precision','day'),
+        'source_text':row.get('source_text','')[:40000],
+        'excerpt':row.get('source_text','')[:500], 'tags':tags,'relevance':relevance,
+        'content_hash':digest}
+
+def ingest_public_sources():
+    result={'ran_at':utcnow(),'added':0,'errors':[],'sources':{}}
+    for source,url,parser,limit in [('PIB',PIB,parse_pib,45),('PRS',PRS,parse_prs,8)]:
+        try:
+            # Try PIB's second official English feed only when primary fails/has no items.
+            urls=[PIB,PIB_ALTERNATE,PIB_LEGACY] if source=='PIB' else [url]
+            parsed=[]
+            last_error=None
+            for source_url in urls:
+                try:
+                    raw=safe_fetch(source_url)
+                    parsed=parser(raw)[:limit]
+                    if not parsed:
+                        raise ValueError('No valid articles found in official source response')
+                    break
+                except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                    last_error=e
+            if not parsed and source=='PIB':
+                try:
+                    parsed=parse_pib_listing(safe_fetch(PIB_ALL))[:limit]
+                except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                    last_error=e
+            if not parsed:
+                raise last_error or ValueError('No source articles')
+            if source=='PRS':
+                for review in list(parsed[:3]):
+                    try:
+                        details=parse_prs_highlights(safe_fetch(review['url']),review['url'],review['published_date'][:7])
+                        parsed.extend(details)
+                    except (ValueError,httpx.HTTPError,ET.ParseError) as e:
+                        result['errors'].append('PRS highlights: '+type(e).__name__)
+                parsed=parsed[:100]
+            rows=[as_article(p) for p in parsed]
+            # Ignore duplicate IDs; never replace previously approved analyses.
+            added=rest_write('articles',rows,on_conflict='id',ignore_duplicates=True)
+            result['added']+=len(added)
+            result['sources'][source]={'found':len(rows),'added':len(added)}
+        except (RuntimeError,ValueError,httpx.HTTPError,ET.ParseError) as e:
+            detail=f'HTTP {e.response.status_code}' if isinstance(e,httpx.HTTPStatusError) else str(e)[:150] if isinstance(e,ValueError) else type(e).__name__
+            result['errors'].append(f'{source}: {detail}')
+    return result
+
+def new_token():return secrets.token_urlsafe(32)
+,'',label,flags=re.I).strip()
+        if '">' in title:
+            title=title.rsplit('">',1)[-1].strip()
+        if len(title)<20 or title.lower() in seen:continue
         seen.add(title.lower())
         items.append({'title':'PRS: '+title,'url':monthly_url,
             'published_date':issue_month+'-01','date_precision':'month','source':'PRS',
