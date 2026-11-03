@@ -333,3 +333,34 @@ def api_root():
     return RedirectResponse('/index.html',status_code=307)
 
 
+
+
+@app.get('/api/_prs_layout_probe')
+def _prs_layout_probe():
+    """Short-lived public PRS layout inspection. Only official public HTML."""
+    from bs4 import BeautifulSoup
+    url='https://prsindia.org/policy/monthly-policy-review/october-2026'
+    soup=BeautifulSoup(c.safe_fetch(url),'html.parser')
+    result={'title':soup.title.get_text(' ',strip=True) if soup.title else '',
+            'headers':[], 'candidate_sections':[], 'pdf_links':[], 'all_text_chars':len(soup.get_text(' ',strip=True))}
+    for tag in soup.select('h1,h2,h3,h4,h5,strong,b')[:85]:
+        label=tag.get_text(' ',strip=True)
+        if not label or len(label)>220:continue
+        result['headers'].append({'tag':tag.name,'class':tag.get('class'),
+           'text':label[:145],
+           'parentTag':tag.parent.name if tag.parent else None,
+           'parentClass':tag.parent.get('class') if tag.parent else None,
+           'nextSibling':(tag.find_next_sibling().get_text(' ',strip=True)[:130]
+                    if tag.find_next_sibling() else None)})
+    for sel in ['.field--name-body','.field--type-text-with-summary',
+                '.node__content','.views-field','.field-item','.main-container',
+                'article','main','.content','.container']:
+        elems=soup.select(sel)
+        result['candidate_sections'].append({'selector':sel,'count':len(elems),
+          'firstText':elems[0].get_text(' ',strip=True)[:270] if elems else ''})
+    for a in soup.select('a[href]'):
+        href=a.get('href','')
+        if '.pdf' in href.lower() or 'pdf' in a.get_text(' ',strip=True).lower():
+            result['pdf_links'].append({'text':a.get_text(' ',strip=True)[:80],'href':href[:230]})
+        if len(result['pdf_links'])>=8:break
+    return result
