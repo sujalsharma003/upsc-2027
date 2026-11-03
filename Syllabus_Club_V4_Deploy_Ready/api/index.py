@@ -56,7 +56,7 @@ def health(user=Depends(get_user)):
     try:
         last=c.rest_rows('ingestion_runs',{'order':'started_at.desc','select':'started_at,finished_at,items_added,errors'},1)
         return {'online':True,'ai_enabled':bool(os.getenv('OPENAI_API_KEY')),
-          'auto_sync':True,'auto_analyze':False,'storage':'Supabase cloud',
+          'auto_sync':True,'auto_analyze':False,'rule_based_study_guides':True,'storage':'Supabase cloud',
           'last_sync':({ 'ran_at':last[0]['started_at'],'added':last[0]['items_added'],
                       'errors':last[0]['errors']} if last else None),
           'sources':{'PIB':c.PIB,'PRS':c.PRS},'tags':list(c.TAG_TERMS)}

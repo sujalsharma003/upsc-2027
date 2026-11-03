@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import urljoin, urlparse, parse_qs
 import httpx
 from bs4 import BeautifulSoup
+from .study_engine import study_guidance
 
 PIB = 'https://www.pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3&reg=48'
 # PIB publishes multiple official English feed listings; try a second one only if the first fails.
@@ -121,6 +122,7 @@ def progress_rows(user_id):
 def flatten_article(article, progress=None):
     progress=progress or {}
     return {**article,
+      'study_guidance':study_guidance(article),
       'tags':article.get('tags') or [],
       'read_status':progress.get('read_status','unread'),
       'revision_stage':progress.get('revision_stage',0),

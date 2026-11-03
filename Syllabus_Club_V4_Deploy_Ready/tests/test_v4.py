@@ -139,3 +139,20 @@ def test_prs_highlights_rejects_external_report():
     import pytest
     with pytest.raises(ValueError):
         core.parse_prs_highlights('Highlights of this Issue','https://example.com/report','2026-10')
+
+
+def test_study_guidance_source_metadata_only():
+    from api.study_engine import study_guidance
+    a={'title':'New RBI monetary policy initiative','source':'PIB','tags':['Economy'],
+       'relevance':83,'excerpt':'Short official preview.'}
+    g=study_guidance(a)
+    assert g['rule_based'] and g['priority']=='high'
+    assert any('Economic' in x for x in g['syllabus_links'])
+    assert len(g['recall_questions'])>=2
+    assert 'study_guidance' in core.flatten_article(a)
+
+def test_study_guidance_demotes_ceremonies():
+    from api.study_engine import study_guidance
+    g=study_guidance({'title':'Minister congratulates award winners','tags':['Polity'],
+                      'relevance':88,'excerpt':''})
+    assert g['priority']!='high'

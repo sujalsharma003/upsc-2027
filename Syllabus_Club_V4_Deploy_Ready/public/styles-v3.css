@@ -31,3 +31,19 @@
 /* V4 account controls — strong contrast, unobtrusive when not used. */
 .cloud-trigger{position:fixed;left:18px;bottom:18px;z-index:890;border:1px solid #393b44;background:#16171d;color:#f5f5f2;padding:12px 17px;border-radius:999px;font:700 11px/1 system-ui,sans-serif;letter-spacing:.1em;box-shadow:0 10px 32px #0006;cursor:pointer;display:flex;gap:11px;align-items:center}.cloud-trigger:hover{border-color:#c4f284}.cloud-dot{width:8px;height:8px;border-radius:50%;background:#656875;display:inline-block}.cloud-dot.ready{background:#bded78;box-shadow:0 0 0 3px #bded7820}.cloud-dot.alert{background:#ffab6c}.cloud-backdrop{position:fixed;inset:0;z-index:2000;background:#0a0a10d9;backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px}.cloud-panel{width:min(460px,100%);background:#1c1b25;color:#f7f7f5;border:1px solid #626070;padding:30px;border-radius:26px;position:relative;box-shadow:0 25px 80px #0009}.cloud-kicker{font-size:10px;letter-spacing:.16em;color:#c6f590;font-weight:800}.cloud-panel h2{font-size:34px;line-height:1.1;letter-spacing:-.055em;margin:15px 0;font-weight:850}.cloud-copy{font-size:13px;line-height:1.6;color:#d3d0df}.cloud-panel label{display:block;font-weight:700;font-size:12px;margin-top:18px}.cloud-panel input{display:block;width:100%;box-sizing:border-box;padding:14px;background:#111119;color:#fff;border:1px solid #575464;border-radius:10px;margin-top:7px;font:inherit}.cloud-actions{display:flex;gap:10px;flex-wrap:wrap;margin:19px 0}.cloud-actions button,.cloud-signout{border:1px solid #676475;color:white;background:transparent;padding:12px 16px;border-radius:12px;font-weight:700;cursor:pointer}.cloud-actions button.cloud-primary{background:#c5ed87;color:#15151c;border-color:#c5ed87}.cloud-actions button:hover{filter:brightness(1.14)}.cloud-x{position:absolute;right:20px;top:17px;border:0;background:transparent;color:#fff;font-size:17px;cursor:pointer}.cloud-feedback{font-size:12px;color:#bde87d;min-height:20px}.cloud-account{font-size:13px}.cloud-warning{background:#423327;color:#ffe3bf;padding:12px;border-radius:11px;font-size:12px;line-height:1.5}.cloud-signout{margin-top:7px;color:#c8c5d0}.cloud-panel small{color:#aeadb9;font-size:11px}
 @media(max-width:600px){.cloud-trigger{left:12px;bottom:76px;padding:10px 13px;box-shadow:0 8px 20px #0005}.cloud-panel{padding:23px;border-radius:20px}.cloud-panel h2{font-size:29px}}
+
+
+/* Current Affairs V5 — metadata-grounded study guides */
+.ca-guide{margin:17px 0 10px;padding:21px;border:1px solid #474b45;border-radius:18px;background:linear-gradient(145deg,#1c2220,#17191c);color:#f6f7f0}
+.ca-guide-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:11px}
+.ca-guide-head strong{font:800 11px/1.4 'Space Grotesk',system-ui,sans-serif;letter-spacing:.12em;color:#ceff99}
+.ca-guide-head span{font-size:10px;font-weight:700;color:#d3dbc9}
+.ca-guide-intro{font-size:12px;line-height:1.65;color:#c6c9c1;margin:0 0 15px}
+.ca-guide-sub{display:block;font-size:10px;letter-spacing:.12em;color:#e7f0df;margin:12px 0 9px}
+.ca-guide-tags{display:flex;gap:7px;flex-wrap:wrap}
+.ca-guide-tags .ca-linktag{background:#313d30;color:#d6ffb1;border:1px solid #5c7350;padding:6px 9px;border-radius:9px;font-size:11px}
+.ca-guide-questions{list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.ca-guide-questions li{display:flex;align-items:flex-start;gap:9px;font-size:12px;line-height:1.55;color:#eee}
+.ca-drill-index{background:#c8f791;color:#15191c;font-size:10px;flex-shrink:0;display:inline-grid;place-items:center;border-radius:50%;height:19px;width:19px;font-weight:800}
+.ca-guide-warning{border-top:1px solid #465043;padding-top:12px;font-size:11px;line-height:1.5;color:#c4d3ba;margin:13px 0 0}
+@media(max-width:700px){.ca-guide{padding:16px}.ca-guide-head span{font-size:9px}}
