@@ -314,7 +314,10 @@ def parse_prs_highlights(html, monthly_url, issue_month):
         label=re.sub(r'\s+',' ',strong.get_text(' ',strip=True)).strip()
         if not (20<=len(label)<=280 and re.search(r'\(p\.\s*\d+\)',label,re.I)):
             continue
-        title=re.sub(r'\s*\(p\.\s*\d+\)\s*
+        title=re.sub(r'\s*\(p\.\s*\d+\)\s*$','',label,flags=re.I).strip()
+        if '">' in title:
+            title=title.rsplit('">',1)[-1].strip()
+        if len(title)<20 or title.lower() in seen:continue
         seen.add(title.lower())
         items.append({'title':'PRS: '+title,'url':monthly_url,
             'published_date':issue_month+'-01','date_precision':'month','source':'PRS',
