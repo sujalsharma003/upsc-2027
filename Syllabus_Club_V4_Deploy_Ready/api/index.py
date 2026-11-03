@@ -64,6 +64,25 @@ def health(user=Depends(get_user)):
           'sources':{'PIB':c.PIB,'PRS':c.PRS},'tags':list(c.TAG_TERMS)}
     except RuntimeError as e:raise hidden(e)
 
+def ai_quota_for_user(user_id:str):
+    today=datetime.now(timezone.utc).date().isoformat()+'T00:00:00+00:00'
+    limit=max(1,min(50,int(os.getenv('DAILY_AI_LIMIT','10'))))
+    usage=c.rest_rows('ai_usage',{
+        'user_id':f'eq.{user_id}','created_at':'gte.'+today,
+        'select':'id'},100)
+    used=len(usage)
+    return {'used':used,'limit':limit,'remaining':max(0,limit-used)}
+
+
+@app.get('/api/ai/usage')
+def ai_usage(user=Depends(get_user)):
+    try:
+        return {**ai_quota_for_user(user['id']),
+                'enabled':bool(os.getenv('GEMINI_API_KEY'))}
+    except (RuntimeError,ValueError) as e:
+        raise hidden(e)
+
+
 @app.get('/api/state')
 def state_get(user=Depends(get_user)):
     try:return c.fetch_study_state(user['id'])
@@ -260,11 +279,8 @@ def analyze(article_id:str,user=Depends(get_user)):
         raise HTTPException(503,'Add GEMINI_API_KEY in Vercel environment settings to enable AI notes')
     try:
         # Cost guard: cap requests per owner/day, even if a token is compromised.
-        start=date.today().isoformat()+'T00:00:00+00:00'
-        usage=c.rest_rows('ai_usage',{'user_id':f'eq.{user["id"]}',
-            'created_at':'gte.'+start, 'select':'id'},100)
-        if len(usage)>=max(1,min(50,int(os.getenv('DAILY_AI_LIMIT','10')))):
-            raise HTTPException(429,'Daily AI analysis limit reached. Continue tomorrow.')
+        if ai_quota_for_user(user['id'])['remaining']<1:
+            raise HTTPException(429,'Daily Gemini generation limit reached. Continue tomorrow.')
         row=article_or_404(article_id,user['id'])
         text=(row.get('source_text') or '')
         # Imported PIB/PRS rows may contain placeholder text. Always get
