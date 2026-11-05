@@ -122,18 +122,19 @@ def articles(source:str='all',tag:str='all',date_from:str='',date_to:str='',q:st
         rows=c.rest_rows('articles',filters,400)
         progress={p['article_id']:p for p in c.progress_rows(user['id'])}
     except RuntimeError as e:raise hidden(e)
-    # One visible card for matching PIB/PRS events from different sources.
-    # No records or notes are deleted; alternate sources remain discoverable.
-    rows,collapsed=dedup.group_public_stories(rows,progress,source_filter=source)
-    visible=[]
+    eligible=[]
     for row in rows:
         if source!='all' and row['source']!=source:continue
         if tag!='all' and tag not in (row['tags'] or []):continue
         if date_from and row['published_date']<date_from:continue
         if date_to and row['published_date']>date_to:continue
         if q and q.lower() not in (row['title']+' '+row.get('excerpt','')).lower():continue
-        visible.append(c.flatten_article(row,progress.get(row['id'])))
-        if len(visible)>=max(1,min(limit,300)):break
+        eligible.append(row)
+    # Match only after filters; otherwise a hidden source could suppress
+    # an article which should remain visible under the selected filter.
+    unique,collapsed=dedup.group_public_stories(eligible,progress,source_filter=source)
+    visible=[c.flatten_article(row,progress.get(row['id']))
+             for row in unique[:max(1,min(limit,300))]]
     return {'items':visible,'duplicates_collapsed':collapsed}
 
 @app.get('/api/articles/{article_id}')
