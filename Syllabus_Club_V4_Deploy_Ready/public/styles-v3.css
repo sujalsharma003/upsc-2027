@@ -127,3 +127,12 @@
 
 /* Keep new Practice Studio navigation reachable on shorter desktop screens */
 @media(min-width:901px){.sidebar .nav{min-height:0;flex:1;overflow-y:auto;scrollbar-width:thin;scrollbar-color:#484356 transparent}.sidebar .side-bottom{flex-shrink:0}}
+
+/* News duplication protection — transparent matches, not destructive deletion */
+.ca-dedup-notice{border:1px solid #6f668d;border-radius:11px;background:#282436;margin:10px 0;padding:11px 13px;display:grid;gap:7px;color:#e5dcef}
+.ca-dedup-notice strong{font-size:11px;color:#ddcbff}
+.ca-dedup-notice>span{font-size:11px;color:#bcb5cc}
+.ca-dedup-notice>div{display:flex;gap:6px;flex-wrap:wrap}
+.ca-match{display:inline-flex;font-size:10px;line-height:1.4;border:1px solid #5d586e;border-radius:8px;background:#1c1e2c;padding:6px 9px;color:#decdf7;text-decoration:none;max-width:100%}
+.ca-match:hover:is(a){border-color:#d7c1ff;text-decoration:underline}
+.ca-dedup-summary{margin:10px 0 16px;padding:10px 13px;border-radius:10px;border:1px solid #6e5f8c;background:#272239;color:#dfd1f4;font-size:11px;line-height:1.5}
