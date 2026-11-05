@@ -394,3 +394,91 @@ def test_new_study_state_fields_are_optional_to_old_snapshots():
     assert 'if(!state.topicWeakness' in code
     assert 'if(!state.activePractice' in code
     assert 'if(!state.aiBatchCheckpoint' in code
+
+
+def test_cross_source_duplicate_headlines_and_distinct_stories():
+    from api import dedup
+    assert dedup.same_news(
+        "Cabinet approves Grid Scale Battery Energy Storage Scheme",
+        "Cabinet clears Grid Scale Battery Energy Storage Scheme")
+    assert not dedup.same_news(
+        "Cabinet approves 14500 crore energy storage funding",
+        "Cabinet approves 2814 crore critical minerals funding")
+    assert not dedup.same_news(
+        "Minister inaugurates Vanijya Bhawan in Jaipur",
+        "Minister inaugurates Udyog Bhawan in Jaipur")
+    assert not dedup.duplicate_public_match(
+        {'source':'PIB','title':'Cabinet approves energy storage scheme','published_date':'2026-11-04'},
+        {'source':'PIB','title':'Cabinet clears energy storage scheme','published_date':'2026-11-04'})
+
+
+def test_pdf_overlap_detects_story_without_discarding_unique_news():
+    from api import dedup
+    news=[
+        {'id':'a','source':'PIB',
+         'title':'Cabinet approves 14500 crore VGF scheme for Grid Scale Energy Storage',
+         'published_date':'2026-11-04','url':'https://pib.gov.in/PressReleseDetail.aspx?PRID=123'},
+        {'id':'b','source':'PRS','title':'Standing Committees identify issues for Parliament',
+         'published_date':'2026-10-01','url':'https://prsindia.org/policy/monthly-policy-review/october-2026'}]
+    magazine=("Current affairs magazine, issue November 2026. "
+              "Cabinet approves 14500 crore VGF scheme for Grid Scale Energy Storage. "
+              "The grant supports grid scale battery storage projects across India. "
+              "Separate news: new agricultural research technology is being developed "
+              "to improve irrigation decisions and support farmers across the country. "
+              "Further coverage on school education policy and primary healthcare.")
+    matches=dedup.pdf_overlaps(magazine,news)
+    assert any(m['id']=='a' for m in matches)
+    assert not any(m['id']=='b' for m in matches)
+    assert dedup.is_single_story_duplicate(magazine,pages=2,filename='monthly.pdf',
+                                            matches=matches,existing=news) is None
+
+
+def test_uploaded_pdf_exact_file_dedup_before_storage(monkeypatch):
+    import fitz
+    from api import dedup
+    signed_in()
+    pdf=fitz.open()
+    page=pdf.new_page()
+    page.insert_text((60,65),
+        'Government announces improved education research and national scholarship schemes')
+    page.insert_text((60,82),
+        'The ministry published this policy measure and provided implementation guidance.')
+    blob=pdf.tobytes()
+    pdf.close()
+    digest=dedup.file_digest(USER['id'],blob)
+    calls=[]
+    def read(table,params=None,limit=300):
+        calls.append((table,params))
+        if table=='articles' and params.get('content_hash')=='eq.'+digest:
+            return [{'id':'77777777-7777-4777-8777-777777777777',
+                     'title':'Previously uploaded.pdf','source':'PDF'}]
+        return []
+    monkeypatch.setattr(core,'rest_rows',read)
+    monkeypatch.setattr(core,'backend',lambda *args,**kwargs: (_ for _ in ()).throw(
+        AssertionError('Duplicate files must never be stored again')))
+    response=client.post('/api/upload',
+        data={'published_date':'2026-11-04'},
+        files={'file':('news-again.pdf',blob,'application/pdf')})
+    assert response.status_code==200,response.text
+    data=response.json()
+    assert data['duplicate'] and data['skipped']
+    assert data['reason']=='identical_file'
+    assert len(calls)==1
+
+
+def test_public_feed_duplicates_collapse_but_preserve_saved_source(monkeypatch):
+    from api import dedup
+    now='2026-11-04'
+    records=[
+        {'id':'a','source':'PIB','title':'Cabinet approves Grid Scale Battery Energy Storage Scheme',
+         'published_date':now,'analysis':None,'url':'https://pib.gov.in'},
+        {'id':'b','source':'PRS','title':'Cabinet clears Grid Scale Battery Energy Storage Scheme',
+         'published_date':now,'analysis':{'summary':'Existing notes'},
+         'url':'https://prsindia.org'}]
+    results,count=dedup.group_public_stories(records)
+    assert count==1
+    assert len(results)==1
+    assert results[0]['id']=='b'  # Generated notes take priority
+    assert results[0]['alternate_sources'][0]['id']=='a'
+    original=dedup.group_public_stories(records,source_filter='PRS')[0]
+    assert len(original)==len(records)  # Source-specific archive remains available
