@@ -51,8 +51,15 @@ def tokenize(text):
 
 def _numbers(text):
     s = unicodedata.normalize("NFKC",str(text or ""))
-    return {x for x in re.findall(r"\b\d[\d,]*(?:\.\d+)?\b",s)
-            if len(x.replace(",",""))>=2 and not 1900<=int(x.replace(",","").split(".")[0])<=2100}
+    values=set()
+    for x in re.findall(r"\b\d[\d,]*(?:\.\d+)?\b",s):
+        norm=x.replace(",","")
+        if len(norm)<2:continue
+        try:
+            if 1900<=int(norm.split(".")[0])<=2100:continue
+        except ValueError:continue
+        values.add(norm)
+    return values
 
 def _amount_conflict(a,b):
     a,b=_numbers(a),_numbers(b)
@@ -78,7 +85,7 @@ def headline_score(title1,title2):
 def same_news(title1,title2, min_score=.84):
     return headline_score(title1,title2)>=min_score
 
-def _within_days(left,right,days=55):
+def _within_days(left,right,days=100):
     try:return abs((date.fromisoformat(str(left)[:10])-date.fromisoformat(str(right)[:10])).days)<=days
     except (ValueError,TypeError):return False
 
@@ -201,12 +208,16 @@ def group_public_stories(rows, progress=None, source_filter="all"):
                     bool(p.get("revision_stage") or p.get("read_status") in ("read","saved"))*4+
                     (item.get("source")=="PIB")*2)
         if quality(row)>quality(old):
-            visible.remove(old)
-            old,row=dict(row),old
-            visible.append(old)
-        old.setdefault("alternate_sources",[])
-        old["alternate_sources"].append({
-            "id":str(row["id"]),"source":row.get("source"),
-            "title":row.get("title"),"url":row.get("url")})
+            old_index=visible.index(old)
+            alternative={"id":str(old["id"]),"source":old.get("source"),
+                         "title":old.get("title"),"url":old.get("url")}
+            replacement=dict(row)
+            replacement["alternate_sources"]=old.get("alternate_sources",[])+[alternative]
+            visible[old_index]=replacement
+        else:
+            old.setdefault("alternate_sources",[])
+            old["alternate_sources"].append({
+                "id":str(row["id"]),"source":row.get("source"),
+                "title":row.get("title"),"url":row.get("url")})
         suppressed+=1
     return visible,suppressed
