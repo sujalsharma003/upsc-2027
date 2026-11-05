@@ -401,3 +401,26 @@ def api_root():
 
 
 
+
+
+@app.get('/api/_dedup_selftest_v1')
+def _dedup_selftest_v1():
+    """Temporary preview-only fixed synthetic examples. No user data."""
+    news=[
+      {'id':'pib1','source':'PIB','title':'Cabinet approves Grid Scale Battery Energy Storage Scheme',
+       'published_date':'2026-11-04','url':'https://pib.gov.in/sample'},
+      {'id':'prs1','source':'PRS','title':'Cabinet clears Grid Scale Battery Energy Storage Scheme',
+       'published_date':'2026-11-04','url':'https://prsindia.org/sample'}]
+    grouped,count=dedup.group_public_stories(news)
+    magazine=('Cabinet approves 14500 crore VGF scheme for Grid Scale Energy Storage. '
+      'This measure concerns battery storage with national funding provisions. '
+      'Other news: agriculture research and school education reform developments.')
+    one={'id':'pib2','source':'PIB','title':'Cabinet approves 14500 crore VGF scheme for Grid Scale Energy Storage',
+      'published_date':'2026-11-04','url':'https://pib.gov.in/another'}
+    matches=dedup.pdf_overlaps(magazine,[one])
+    return {'grouped':count,'kept':len(grouped),'alternate':len(grouped[0].get('alternate_sources',[])),
+      'matches':len(matches),'multi_story_kept':dedup.is_single_story_duplicate(
+        magazine,pages=2,filename='monthly.pdf',matches=matches,existing=[one]) is None,
+      'distinct':not dedup.same_news('Minister inaugurates Vanijya Bhawan in Jaipur',
+                                   'Minister inaugurates Udyog Bhawan in Jaipur'),
+      'exact_digest_deterministic':dedup.file_digest('u',b'text')==dedup.file_digest('u',b'text')}
