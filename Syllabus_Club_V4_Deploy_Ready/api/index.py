@@ -17,6 +17,7 @@ from pydantic import BaseModel,Field
 from . import core as c
 from . import gemini_client
 from . import source_text
+from . import dedup
 
 app=FastAPI(title='Syllabus Club V4 API',docs_url=None,redoc_url=None,openapi_url=None)
 MAX_PDF=4*1024*1024  # Keep below the Vercel request payload limit.
@@ -106,7 +107,7 @@ def articles(source:str='all',tag:str='all',date_from:str='',date_to:str='',q:st
     try:
         filters={'or':f'(owner_id.is.null,owner_id.eq.{user["id"]})',
              'order':'published_date.desc,added_at.desc',
-             'select':'id,owner_id,source,url,title,published_date,date_precision,added_at,excerpt,tags,relevance,analysis,analyzed_at,file_name'}
+             'select':'id,owner_id,source,url,title,published_date,date_precision,added_at,excerpt,tags,relevance,analysis,analyzed_at,file_name,overlap_sources'}
         if source!='all':
             if source not in ('PIB','PRS','PDF'):raise HTTPException(422,'Unknown source filter')
             filters['source']='eq.'+source
@@ -121,6 +122,9 @@ def articles(source:str='all',tag:str='all',date_from:str='',date_to:str='',q:st
         rows=c.rest_rows('articles',filters,400)
         progress={p['article_id']:p for p in c.progress_rows(user['id'])}
     except RuntimeError as e:raise hidden(e)
+    # One visible card for matching PIB/PRS events from different sources.
+    # No records or notes are deleted; alternate sources remain discoverable.
+    rows,collapsed=dedup.group_public_stories(rows,progress,source_filter=source)
     visible=[]
     for row in rows:
         if source!='all' and row['source']!=source:continue
@@ -130,7 +134,7 @@ def articles(source:str='all',tag:str='all',date_from:str='',date_to:str='',q:st
         if q and q.lower() not in (row['title']+' '+row.get('excerpt','')).lower():continue
         visible.append(c.flatten_article(row,progress.get(row['id'])))
         if len(visible)>=max(1,min(limit,300)):break
-    return {'items':visible}
+    return {'items':visible,'duplicates_collapsed':collapsed}
 
 @app.get('/api/articles/{article_id}')
 def article(article_id:str,user=Depends(get_user)):
@@ -182,19 +186,55 @@ async def upload(file:UploadFile=File(...),published_date:str=Form(...),user=Dep
         pdf=fitz.open(stream=blob,filetype='pdf')
         if pdf.needs_pass:raise ValueError('Password-protected PDFs are not supported')
         if pdf.page_count>120:raise ValueError('Use a PDF with 120 pages or fewer')
-        raw=' '.join(page.get_text() for page in pdf)
+        pdf_pages=[page.get_text() for page in pdf]
+        raw='\n'.join(pdf_pages)
         pdf.close()
     except (RuntimeError,ValueError) as e:raise HTTPException(422,str(e))
     extracted=' '.join(raw.split())[:40000]
+    if len(extracted)<50:
+        raise HTTPException(422,'PDF has too little readable text for Current Affairs. Use a text-based PDF.')
     doc_id=str(uuid.uuid4())
     file_name=Path(file.filename or 'uploaded.pdf').name[:150]
     path=f'pdf/{user["id"]}/{doc_id}.pdf'
     tags,rank=c.classify(file_name,extracted)
+    # SHA256 is owner-scoped and deterministic: same file cannot be imported twice.
+    digest=dedup.file_digest(user['id'],blob)
+    try:
+        exact=c.rest_rows('articles',{
+            'owner_id':'eq.'+user['id'],'source':'eq.PDF',
+            'content_hash':'eq.'+digest,
+            'select':'id,title,source,file_name'},1)
+        if exact:
+            return {'duplicate':True,'skipped':True,'reason':'identical_file',
+                    'existing_id':exact[0]['id'],'matched_title':exact[0].get('title',''),
+                    'matched_sources':[]}
+        # Compare normalized text too: PDFs re-exported with different metadata
+        # or filenames should not generate duplicate notes.
+        prior=c.rest_rows('articles',{
+            'owner_id':'eq.'+user['id'],'source':'eq.PDF',
+            'select':'id,title,source,source_text,published_date'},300)
+        canonical=' '.join(extracted.lower().split())
+        for existing in prior:
+            if ' '.join((existing.get('source_text') or '').lower().split())==canonical:
+                return {'duplicate':True,'skipped':True,'reason':'identical_text',
+                        'existing_id':existing['id'],
+                        'matched_title':existing.get('title',''),'matched_sources':[]}
+        related=dedup.scoped_candidates(user['id'],c.rest_rows)
+        # Only use event titles for matching, never a different owner's private PDF.
+        matches=dedup.pdf_overlaps(raw,related)
+        single=dedup.is_single_story_duplicate(
+            raw,pages=len(pdf_pages),filename=file_name,matches=matches,existing=related)
+        if single:
+            return {'duplicate':True,'skipped':True,'reason':'already_covered',
+                    'existing_id':single['id'],
+                    'matched_title':single['title'],
+                    'matched_sources':matches[:10]}
+    except RuntimeError as e:raise hidden(e)
     row=c.as_article({'source':'PDF','title':file_name,'published_date':published_date,
         'source_text':extracted,'date_precision':'day'},owner_id=user['id'])
     row.update({'id':doc_id,'file_name':file_name,'file_path':path,
-        'content_hash':__import__('hashlib').sha256((user['id']+'-'+doc_id).encode()).hexdigest(),
-        'tags':tags,'relevance':rank})
+        'content_hash':digest,'tags':tags,'relevance':rank,
+        'overlap_sources':matches[:20]})
     try:
         c.backend('POST','/storage/v1/object/study-private/'+path,
           raw=blob,headers={'Content-Type':'application/pdf','x-upsert':'false'})
@@ -202,7 +242,9 @@ async def upload(file:UploadFile=File(...),published_date:str=Form(...),user=Dep
         except RuntimeError:
             c.backend('DELETE','/storage/v1/object/study-private/'+path)
             raise
-        return c.flatten_article(row)
+        return {'duplicate':False,'skipped':False,'article':c.flatten_article(row),
+                'matched_sources':matches[:20],
+                'matched_count':len(matches)}
     except RuntimeError as e:raise hidden(e)
 
 def signed_download(path:str):
