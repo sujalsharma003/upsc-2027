@@ -59,8 +59,12 @@ const UPSC_RECOVERY=(()=>{
    // Archive finished recovery blocks in place, but move unfinished missed blocks.
    for(const a of slots){
      if(a.cancelled||done[a.id])continue;
-     if(done[a.originId]){a.cancelled=true;changed=true;continue}
-     if(a.date<now||state.missedDays[a.date]){
+     // A same-day "missed" flag can be undone; never keep ghost recovery
+     // blocks for a day that is no longer due or for a completed original task.
+     if(done[a.originId]||!allTasks.has(a.originId)){
+       a.cancelled=true;changed=true;continue;
+     }
+     if(!a.date||a.date<now||state.missedDays[a.date]){
        a.date=null;changed=true;
      }
    }
