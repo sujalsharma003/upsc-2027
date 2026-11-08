@@ -136,3 +136,17 @@
 .ca-match{display:inline-flex;font-size:10px;line-height:1.4;border:1px solid #5d586e;border-radius:8px;background:#1c1e2c;padding:6px 9px;color:#decdf7;text-decoration:none;max-width:100%}
 .ca-match:hover:is(a){border-color:#d7c1ff;text-decoration:underline}
 .ca-dedup-summary{margin:10px 0 16px;padding:10px 13px;border-radius:10px;border:1px solid #6e5f8c;background:#272239;color:#dfd1f4;font-size:11px;line-height:1.5}
+
+/* V11 — missed-day recovery without overfilling a six-hour plan */
+.catchup-panel{margin:16px 0 20px;padding:20px 23px;background:linear-gradient(120deg,#222b28,#262235);border:1px solid #6b7863;border-radius:17px;color:#eef3e9}
+.catchup-panel strong{font-size:14px;color:#e6ffbd}
+.catchup-panel p{font-size:11px;color:#b9c8ba;line-height:1.65;margin:8px 0 0}
+.catchup-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
+.catchup-head>.small-tag{white-space:nowrap}
+.catchup-stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:15px}
+.catchup-stats>span{display:inline-flex;align-items:center;padding:9px 12px;border-radius:9px;background:#151e1c;color:#dbe6d3;border:1px solid #485c4f;font-weight:700;font-size:11px}
+.catchup-panel .catchup-warning{color:#ffd2a7;padding:10px;border-radius:9px;background:#493326;border:1px solid #856043;margin-top:12px}
+.catchup-panel .catchup-highlight{font-weight:800;color:#d8d0ff}
+.catchup-panel .outline-btn{margin-top:14px}
+.task-row:has(.task-main strong:first-child) .task-main p{overflow-wrap:anywhere}
+@media(max-width:700px){.catchup-panel{padding:16px}.catchup-head{display:block}.catchup-head .small-tag{display:inline-block;margin-top:10px}.catchup-stats>span{flex:1 1 130px}}

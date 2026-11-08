@@ -482,3 +482,38 @@ def test_public_feed_duplicates_collapse_but_preserve_saved_source(monkeypatch):
     assert results[0]['alternate_sources'][0]['id']=='a'
     original=dedup.group_public_stories(records,source_filter='PRS')[0]
     assert len(original)==len(records)  # Source-specific archive remains available
+
+
+def test_november_replan_preserves_prior_study_data():
+    from pathlib import Path
+    root=Path(__file__).resolve().parents[1]
+    js=(root/'public'/'app.js').read_text(encoding='utf-8')
+    data=(root/'public'/'data.js').read_text(encoding='utf-8')
+    html=(root/'public'/'index.html').read_text(encoding='utf-8')
+    assert "startDate:'2026-11-12'" in data
+    assert "endDate:'2027-05-07'" in data
+    assert "examDate:'2027-05-07'" in data
+    assert 'archivedTaskCompletions' in js
+    assert 'state.completedTasks={}' in js
+    assert 'UPSC_RECOVERY.markComplete' in js
+    assert 'UPSC_RECOVERY.reconcile' in js
+    assert 'refreshRecovery({persist:true})' in js
+    assert 'data-mark-missed' in js
+    assert 'recoveryDashboard()' in js
+    assert 'schedule-recovery.js?v=11' in html
+    assert 'app.js?v=11' in html
+    assert html.index('schedule-recovery.js?v=11') < html.index('app.js?v=11')
+
+
+def test_recovery_planner_has_non_destructive_capacity_protection():
+    from pathlib import Path
+    code=(Path(__file__).resolve().parents[1]/'public'/'schedule-recovery.js').read_text(encoding='utf-8')
+    assert 'function reconcile(' in code
+    assert 'function tasksFor(' in code
+    assert 'function markComplete(' in code
+    assert 'const recoveryEnd=shift(end,-6)' in code
+    assert 'if(di===6)' in code
+    assert 'return item?{slotId:item.id,minutes:60' in code
+    assert 'sourceMinutes:task.minutes' in code
+    assert 'remaining=Math.max(0,task.minutes-booked)' in code
+    assert 'completedTasks' in code
