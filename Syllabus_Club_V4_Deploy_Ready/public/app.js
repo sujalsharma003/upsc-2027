@@ -11,9 +11,10 @@ const niceDate=(date,opts={day:'numeric',month:'short'})=>new Date(date+'T12:00:
 const num=n=>Math.round(n*10)/10;
 const dayDiff=(a,b)=>Math.round((toMs(b)-toMs(a))/ms);
 const clampPlan=d=>d<SEED.startDate?SEED.startDate:d>SEED.endDate?SEED.endDate:d;
-const initial=()=>({topics:Object.fromEntries(SEED.topics.map(t=>[t.id,{status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false}])),completedTasks:{},readResources:{},notes:[],documents:[],reminders:[],tests:[],practiceHistory:[],mistakeLog:[],topicWeakness:{},subjectWeakness:{},activePractice:null,aiBatchCheckpoint:null,studySessions:[],timer:null,timerPrefs:{subject:'environment',mode:'stopwatch',taskId:''},createdAt:new Date().toISOString(),version:2});
+const initial=()=>({recoveryAssignments:[],missedDays:{},topics:Object.fromEntries(SEED.topics.map(t=>[t.id,{status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false}])),completedTasks:{},readResources:{},notes:[],documents:[],reminders:[],tests:[],practiceHistory:[],mistakeLog:[],topicWeakness:{},subjectWeakness:{},activePractice:null,aiBatchCheckpoint:null,studySessions:[],timer:null,timerPrefs:{subject:'environment',mode:'stopwatch',taskId:''},createdAt:new Date().toISOString(),version:2});
 let state;try{const saved=localStorage.getItem(STORE);state=saved?JSON.parse(saved):initial()}catch(e){state=initial()}
 if(!state||!state.topics)state=initial();
+UPSC_RECOVERY.ensureState(state);
 for(const t of SEED.topics)if(!state.topics[t.id])state.topics[t.id]={status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false};
 if(!Array.isArray(state.practiceHistory))state.practiceHistory=[];
 if(!Array.isArray(state.mistakeLog))state.mistakeLog=[];
@@ -24,23 +25,23 @@ if(!state.aiBatchCheckpoint||!Array.isArray(state.aiBatchCheckpoint.ids))state.a
 
 for(const k of ['completedTasks','readResources'])if(!state[k])state[k]={};for(const k of ['notes','documents','reminders','tests','studySessions'])if(!Array.isArray(state[k]))state[k]=[];if(!state.timerPrefs)state.timerPrefs={subject:'environment',mode:'stopwatch',taskId:''};
 let caUI={online:null,ai:false,auto:false,items:[],lastSync:null,source:'all',tag:'all',status:'all',search:'',from:'',to:'',expanded:null,loading:false,busyId:null,error:'',collapsed:0,bulk:state.aiBatchCheckpoint?{...state.aiBatchCheckpoint,running:false,stop:false}:null};
-let zenMode=false;let page='overview',day=clampPlan(todayISO()),weekIndex=between(Math.floor(dayDiff(SEED.startDate,day)/7),0,25),subjectFilter='all',statusFilter='all',query='',revisionFilter='all',revisionPageSize=40,noteQuery='',modal=null;
+let zenMode=false;let page='overview',day=clampPlan(todayISO()),weekIndex=between(Math.floor(dayDiff(SEED.startDate,day)/7),0,SEED.weeks.length-1),subjectFilter='all',statusFilter='all',query='',revisionFilter='all',revisionPageSize=40,noteQuery='',modal=null;
 const save=(cloud=true)=>{try{localStorage.setItem(STORE,JSON.stringify(state));if(cloud)window.SYLLABUS_CLOUD?.scheduleSave()}catch(e){toast('Local storage unavailable or full. Export a backup.')}};
 const topicStatus=t=>state.topics[t.id]?.status||t.status;
 const point=v=>({done:1,revision:.75,partial:.4,none:0}[v]||0);
 const subjectStats=()=>SEED.subjects.map(s=>{const ts=SEED.topics.filter(t=>t.subject===s.id);let coverage=ts.reduce((a,t)=>a+point(topicStatus(t)),0);return {...s,count:ts.length,weighted:coverage,percent:num(coverage/ts.length*100),done:ts.filter(t=>topicStatus(t)==='done').length,partial:ts.filter(t=>topicStatus(t)==='partial').length,none:ts.filter(t=>topicStatus(t)==='none').length,ready:ts.filter(t=>state.topics[t.id].ready).length}});
 const stats=()=>{const ss=subjectStats();return {ss,weighted:num(ss.reduce((a,s)=>a+s.weighted,0)),coverage:num(ss.reduce((a,s)=>a+s.weighted,0)/SEED.topics.length*100),done:ss.reduce((a,s)=>a+s.done,0),partial:ss.reduce((a,s)=>a+s.partial,0),none:ss.reduce((a,s)=>a+s.none,0),ready:ss.reduce((a,s)=>a+s.ready,0)}};
-const currentWeek=i=>SEED.weeks[between(i,0,25)];
-const weekDates=i=>({start:addDays(SEED.startDate,i*7),end:addDays(SEED.startDate,Math.min(i*7+6,178))});
+const currentWeek=i=>SEED.weeks[between(i,0,SEED.weeks.length-1)];
+const weekDates=i=>({start:addDays(SEED.startDate,i*7),end:addDays(SEED.startDate,Math.min(i*7+6,dayDiff(SEED.startDate,SEED.endDate)))});
 const readableWeek=i=>{const d=weekDates(i);return `${niceDate(d.start)} – ${niceDate(d.end)}`};
 const mockDay=(wi,di)=>wi>=16&&wi<25&&(di===2||di===5);
-function getDayTasks(d){
- const i=between(Math.floor(dayDiff(SEED.startDate,d)/7),0,25),di=dayDiff(SEED.startDate,d)%7,w=currentWeek(i);
+function baseDayTasks(d){
+ const i=between(Math.floor(dayDiff(SEED.startDate,d)/7),0,SEED.weeks.length-1),di=dayDiff(SEED.startDate,d)%7,w=currentWeek(i);
  const newTopic=w.newTopics[di%w.newTopics.length],old=w.revision[di%w.revision.length],weekNumber=i+1;
  const ca=['National schemes and policies','Economy, RBI and Budget','Environment and species in news','International relations and mapping','Polity, laws and judgments','Science, space and technology','Weekly current affairs consolidation'];
  const csat=['Reading comprehension','Quantitative aptitude','Logical reasoning','Data interpretation','Reading comprehension timed set','Numeracy and reasoning PYQs','CSAT mixed recap'];
  const id=(k)=>`${d}::${k}`;
- if(i===25)return [
+ if(i===SEED.weeks.length-1)return [
   {id:id('light'),title:'Light final revision',detail:`${newTopic}; review only concise notes`,minutes:105,category:'Review'},
   {id:id('weak'),title:'Mistake log and maps',detail:'Revisit repeated errors; do not start a large new chapter',minutes:75,category:'Practice'},
   {id:id('current'),title:'Current Affairs essentials',detail:'Final indices, schemes, major international events',minutes:45,category:'Current'},
@@ -72,8 +73,37 @@ function getDayTasks(d){
   {id:id('csat'),title:'CSAT maintenance',detail:csat[di],minutes:45,category:'CSAT'},
   {id:id('recall'),title:'Spaced recall',detail:'Review notes due Day 1, 7, 21 and 45',minutes:15,category:'Recall'}];
 }
+
+function refreshRecovery({persist=true}={}){
+ const result=UPSC_RECOVERY.reconcile({state,start:SEED.startDate,end:SEED.endDate,now:todayISO(),baseTasks:baseDayTasks});
+ if(result.changed&&persist)save();
+ return result;
+}
+function getDayTasks(d){return UPSC_RECOVERY.tasksFor({date:d,state,baseTasks:baseDayTasks})}
+function markMissedStudyDay(date,missed){
+ if(date<SEED.startDate||date>SEED.endDate||date>todayISO())return;
+ if(missed)state.missedDays[date]=true;else delete state.missedDays[date];
+ refreshRecovery({persist:false});save();render();
+ toast(missed?'Missed day recorded; priority targets moved into catch-up':'Day restored; unfinished work is still tracked');
+}
+function recoverySummary(){
+ return UPSC_RECOVERY.summary({state,start:SEED.startDate,end:SEED.endDate,now:todayISO(),baseTasks:baseDayTasks});
+}
+function recoveryDashboard(){
+ const summary=recoverySummary();
+ const active=state.recoveryAssignments.filter(x=>!x.cancelled&&!state.completedTasks[x.id]);
+ const selected=getDayTasks(day).filter(t=>t.category==='Recovery');
+ if(todayISO()<SEED.startDate)return '<div class="catchup-panel"><strong>✳ YOUR NEW START</strong><p>Plan begins 12 November. No earlier day is treated as missed.</p></div>';
+ return '<section class="catchup-panel"><div class="catchup-head"><div><strong>↻ Smart missed-day recovery</strong><p>Catch-up replaces flexible practice, without exceeding six hours.</p></div><span class="small-tag">'+active.length+' blocks pending</span></div><div class="catchup-stats"><span>'+summary.missedTopics+' missed priority targets</span><span>'+Math.round(summary.assignedMinutes/6)/10+'h assigned</span><span>'+Math.round(summary.unassignedMinutes/6)/10+'h unassigned</span></div>'+
+ (summary.unassignedMinutes?'<p class="catchup-warning">Not enough available slots before final revision week. Prioritize your highest-impact unfinished topics.</p>':'')+
+ (summary.missedMocks?'<p class="catchup-warning">'+summary.missedMocks+' missed mock(s) need a separate full-length session. Mocks are not compressed.</p>':'')+
+ (selected.length?'<p class="catchup-highlight">Selected day has '+selected.length+' catch-up block(s).</p>':'')+
+ '<button class="outline-btn" data-nav="today">Open recovery plan ↗</button></section>';
+}
+
 const taskDone=id=>!!state.completedTasks[id];
-function backlogTasks(){const end=todayISO()<=SEED.endDate?addDays(todayISO(),-1):SEED.endDate;if(end<SEED.startDate)return [];const out=[];for(let d=SEED.startDate;d<=end;d=addDays(d,1)){for(const t of getDayTasks(d))if(!taskDone(t.id))out.push({...t,date:d})}return out.reverse()}
+refreshRecovery({persist:false});
+function backlogTasks(){const now=todayISO(),end=now<=SEED.endDate?addDays(now,-1):SEED.endDate;if(end<SEED.startDate)return [];const out=[];for(let d=SEED.startDate;d<=end;d=addDays(d,1)){for(const t of baseDayTasks(d))if(!taskDone(t.id))out.push({...t,date:d})}return out.reverse()}
 function dueTopics(){return SEED.topics.filter(t=>{const p=state.topics[t.id];return !p.ready&&(
  (p.revisionDue&&p.revisionDue<=todayISO())||
  (p.status!=='none'&&(!p.revisionStage||!p.revisionDue)))
