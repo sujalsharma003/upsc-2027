@@ -15,6 +15,18 @@ const initial=()=>({recoveryAssignments:[],missedDays:{},topics:Object.fromEntri
 let state;try{const saved=localStorage.getItem(STORE);state=saved?JSON.parse(saved):initial()}catch(e){state=initial()}
 if(!state||!state.topics)state=initial();
 UPSC_RECOVERY.ensureState(state);
+// Preserve checks from the former 3 Nov–30 Apr timetable as history.
+// A checked old-date task refers to different subject material after rescheduling.
+const PLAN_VERSION='2026-11-12_to_2027-05-07';
+let planMigrated=false;
+if(state.scheduleVersion!==PLAN_VERSION){
+ state.archivedTaskCompletions={...(state.archivedTaskCompletions||{}),...(state.completedTasks||{})};
+ state.completedTasks={};
+ state.recoveryAssignments=[];
+ state.missedDays={};
+ state.scheduleVersion=PLAN_VERSION;
+ planMigrated=true;
+}
 for(const t of SEED.topics)if(!state.topics[t.id])state.topics[t.id]={status:t.status,priority:t.priority,revisionStage:0,revisionDue:null,ready:false};
 if(!Array.isArray(state.practiceHistory))state.practiceHistory=[];
 if(!Array.isArray(state.mistakeLog))state.mistakeLog=[];
@@ -781,10 +793,10 @@ function handleChange(e){const t=e.target;
 let inputDebounce;function handleInput(e){if(e.target.id==='topic-search'){query=e.target.value;clearTimeout(inputDebounce);inputDebounce=setTimeout(()=>{const pos=e.target.selectionStart;render();const el=$('#topic-search');if(el){el.focus();el.setSelectionRange(pos,pos)}},200)}if(e.target.id==='note-search'){noteQuery=e.target.value;clearTimeout(inputDebounce);inputDebounce=setTimeout(()=>{const pos=e.target.selectionStart;render();const el=$('#note-search');if(el){el.focus();el.setSelectionRange(pos,pos)}},180)}}
 document.addEventListener('click',handleClick);document.addEventListener('change',handleChange);document.addEventListener('submit',handleSubmit);document.addEventListener('input',handleInput);document.addEventListener('click',e=>{if(e.target.matches('[data-dismiss]')){modal=null;render()}});document.addEventListener('keydown',e=>{if(e.key==='Escape'&&modal){modal=null;render()}else if(e.key==='Escape'&&zenMode){zenMode=false;render()}});
 const alerted=new Set();setInterval(()=>{if(!('Notification'in window)||Notification.permission!=='granted')return;const now=new Date().toISOString().slice(0,16),localNow=todayISO()+'T'+new Date().toTimeString().slice(0,5);state.reminders.filter(r=>!r.done&&r.dueAt<=localNow&&!alerted.has(r.id)).forEach(r=>{alerted.add(r.id);try{new Notification('UPSC reminder',{body:r.title})}catch{}})},60000);
-if(!localStorage.getItem(STORE))save(false);bootTimer();render();
+if(planMigrated||!localStorage.getItem(STORE))save(false);bootTimer();render();
 // A cloud session can finish connecting after the user opens Current Affairs.
 // Refresh the feed whenever the authenticated cloud connection state changes.
-window.addEventListener('syllabus-cloud-ready',()=>{if(page==='current')caLoad();});
+window.addEventListener('syllabus-cloud-ready',()=>{if(planMigrated&&window.SYLLABUS_CLOUD?.loggedIn){planMigrated=false;save()}if(page==='current')caLoad();});
 let lastHeartbeat=0;setInterval(()=>{const t=state.timer;if(t?.status==='running'){const secs=getTimerSeconds(),lim=modeLimit[t.mode]||0;if(lim&&secs>=lim){stopTimer(true);return}const remaining=lim?Math.max(0,lim-secs):secs;document.querySelectorAll('[data-clock]').forEach(el=>el.textContent=secFmt(remaining));document.querySelectorAll('[data-timer-meter]').forEach(el=>el.style.width=(lim?Math.min(100,secs/lim*100):Math.min(100,dailyStudied(todayISO())/21600*100))+'%');const amount=shortDuration(dailyStudied(todayISO()));document.querySelectorAll('[data-live-today],[data-live-total],[data-header-time]').forEach(el=>el.textContent=amount);if(Date.now()-lastHeartbeat>9000){t.lastHeartbeat=nowStamp();save(false);lastHeartbeat=Date.now();}}},1000);
 window.addEventListener('pagehide',()=>{if(state.timer?.status==='running')pauseTimer()});window.addEventListener('pageshow',e=>{if(e.persisted)render()});
 })();
